@@ -11,14 +11,18 @@ dataset defines its labels (storage days), not on invented shelf-life numbers.
 This file only DEFINES things. Nothing runs when it is imported.
 """
 
+from pathlib import Path
+
 import numpy as np
 import tensorflow as tf
 from PIL import Image, ImageOps
 
 from src.dataset_loader import SPECIES_NAMES
+from src.eye_checker import EyeChecker
 from src.fish_model import FishModel
 
 CONFIDENCE_THRESHOLD = 0.60
+EYE_CHECK_FILE = "eye_check.npz"  # made by scripts/build_eye_check.py
 
 # Freshness guide, taken from the FFE dataset's label definitions.
 # The dataset does not document how the fish were stored, so we do NOT turn
@@ -63,6 +67,12 @@ class FishPredictor:
         self._species_model = FishModel.load(models_dir, "species")
         self._freshness_model = FishModel.load(models_dir, "freshness")
         self._threshold = threshold
+        # The fish-eye check is optional: if its file is missing, scans still work
+        # and the result says the check was not available.
+        try:
+            self._eye_checker = EyeChecker.load(Path(models_dir) / EYE_CHECK_FILE)
+        except FileNotFoundError:
+            self._eye_checker = None
 
     @property
     def threshold(self):
@@ -89,18 +99,43 @@ class FishPredictor:
         resized = tf.cast(resized, tf.uint8)  # same rounding as the training pipeline
         return np.asarray(resized, dtype=np.float32)[np.newaxis, ...]
 
-    def predict(self, image):
-        """Returns {"species": {...}, "freshness": {...}} for one PIL image."""
-        batch = self.prepare_image(image)
-        species = self._describe(self._species_model, batch)
-        freshness = self._describe(self._freshness_model, batch)
-        freshness["guide"] = FRESHNESS_GUIDE[freshness["top_class"]]
-        return {"species": species, "freshness": freshness}
+    @property
+    def eye_checker(self):
+        return self._eye_checker
 
-    def _describe(self, model, batch):
+    @property
+    def species_class_names(self):
+        return self._species_model.class_names
+
+    def species_features(self, batch):
+        """Features + species probabilities for a batch made by prepare_image
+        (used by the scripts that build and test the fish-eye check)."""
+        return self._species_model.predict_features_and_probabilities(batch)
+
+    def predict(self, image):
+        """Returns {"eye_check": {...}, "species": {...}, "freshness": {...}} for one PIL image."""
+        batch = self.prepare_image(image)
+        features, species_probabilities = self.species_features(batch)
+        species = self._describe(self._species_model.class_names, species_probabilities[0])
+        freshness = self._describe(self._freshness_model.class_names,
+                                   self._freshness_model.predict_probabilities(batch)[0])
+        freshness["guide"] = FRESHNESS_GUIDE[freshness["top_class"]]
+        return {"eye_check": self._check_eye(features),
+                "species": species, "freshness": freshness}
+
+    def _check_eye(self, features):
+        """Runs the fish-eye check (if its file was found)."""
+        if self._eye_checker is None:
+            return {"available": False, "recognized": True}
+        distance = float(self._eye_checker.distances(features)[0])
+        return {"available": True,
+                "recognized": distance <= self._eye_checker.threshold,
+                "distance": distance,
+                "threshold": self._eye_checker.threshold}
+
+    def _describe(self, class_names, probabilities):
         """Turns one model's softmax output into an easy-to-show dictionary."""
-        probabilities = model.predict_probabilities(batch)[0]
-        ranked = sorted(zip(model.class_names, probabilities.tolist()),
+        ranked = sorted(zip(class_names, probabilities.tolist()),
                         key=lambda pair: pair[1], reverse=True)
         top_class, top_probability = ranked[0]
         return {

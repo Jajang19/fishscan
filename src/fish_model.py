@@ -62,6 +62,7 @@ class FishModel:
         self._model = None                   # the Keras model
         self._base = None                    # the MobileNetV2 part
         self._history = []                   # one row per epoch (for the curves)
+        self._feature_model = None           # built on first use (fish-eye check)
 
     @property
     def name(self):
@@ -188,6 +189,26 @@ class FishModel:
         if self._temperature != 1.0:
             probabilities = apply_temperature(probabilities, self._temperature)
         return probabilities
+
+    def predict_features_and_probabilities(self, images):
+        """Like predict_probabilities, but ALSO returns the 1,280 'feature' numbers
+        that MobileNetV2 produced for each image (the output of the pooling layer,
+        just before the softmax layer). The fish-eye check compares these numbers
+        with the training photos.
+
+        Returns (features (n, 1280), probabilities (n, classes)).
+        """
+        if self._feature_model is None:
+            # A second view of the SAME model with two outputs (no new weights)
+            pooling = next(layer for layer in self._model.layers
+                           if isinstance(layer, tf.keras.layers.GlobalAveragePooling2D))
+            self._feature_model = tf.keras.Model(self._model.input,
+                                                 [pooling.output, self._model.output])
+        features, probabilities = self._feature_model.predict(
+            np.asarray(images, dtype=np.float32), verbose=0)
+        if self._temperature != 1.0:
+            probabilities = apply_temperature(probabilities, self._temperature)
+        return features, probabilities
 
     def evaluate(self, dataset):
         """Returns {'loss': ..., 'accuracy': ...} on a dataset (without temperature;

@@ -16,6 +16,7 @@ Phone on the same Wi-Fi: open the "Network URL" that Streamlit prints.
 """
 
 import hashlib
+import json
 from pathlib import Path
 
 import numpy as np
@@ -51,6 +52,16 @@ def load_predictor():
 def load_report(task):
     """Reads the saved evaluation files for one model (cached after the first read)."""
     return ModelEvaluator.load_saved_report(REPORTS_DIR, task)
+
+
+@st.cache_data
+def load_eye_check_results():
+    """Reads reports/eye_check_results.json (made by scripts/test_eye_check.py), or None."""
+    path = REPORTS_DIR / "eye_check_results.json"
+    if not path.exists():
+        return None
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 @st.cache_data
@@ -174,9 +185,27 @@ class FishScanApp:
     # ------------------------------------------------------------------
     def _show_results(self, result, threshold):
         st.divider()
-        self._show_species(result["species"], threshold)
-        st.divider()
-        self._show_freshness(result["freshness"], threshold)
+        eye_check = result["eye_check"]
+        if not eye_check["recognized"]:
+            # The photo is not similar to any fish-eye photo the model learned from:
+            # do NOT show a confident-looking species/freshness answer.
+            st.error("### 🚫 Not recognized as a fish-eye close-up\n"
+                     "This photo does not look like the fish-eye photos FishScan was trained "
+                     "on, so its species and freshness percentages would not mean anything.\n\n"
+                     "**Try again:** a sharp, well-lit close-up of ONE fish eye, centred and "
+                     "filling most of the photo.")
+            with st.expander("Show the model's guesses anyway (for learning only)"):
+                st.caption("Softmax always splits 100% among the classes it knows, so even a "
+                           "photo of a hand gets a species. These numbers are NOT a real result.")
+                self._show_species(result["species"], threshold)
+                self._show_freshness(result["freshness"], threshold)
+        else:
+            self._show_species(result["species"], threshold)
+            st.divider()
+            self._show_freshness(result["freshness"], threshold)
+        if not eye_check["available"]:
+            st.caption("(The fish-eye check file models/eye_check.npz was not found, so this "
+                       "photo was not checked.)")
         st.divider()
         st.info("**Safety note:** fish that smells sour or ammonia-like, has slimy or dull skin, "
                 "grey or brown gills, or soft flesh that does not spring back should not be eaten, "
@@ -242,8 +271,8 @@ class FishScanApp:
                     "(about 15% of the dataset, split so that crops of the same photo never "
                     "appear in both training and testing).")
 
-        species_tab, freshness_tab, explain_tab = st.tabs(
-            ["🐟 Species", "🧊 Freshness", "💡 How to read this"])
+        species_tab, freshness_tab, check_tab, explain_tab = st.tabs(
+            ["🐟 Species", "🧊 Freshness", "🚫 Fish-eye check", "💡 How to read this"])
         with species_tab:
             self._show_model_report(
                 "species", "Species model (7 classes)",
@@ -254,6 +283,8 @@ class FishScanApp:
                 "Predicts Highly Fresh (storage day 1-2), Fresh (day 3-4) or Not Fresh "
                 "(day 5-6), as defined by the FFE dataset.")
             self._show_freshness_experiments()
+        with check_tab:
+            self._show_eye_check_report()
         with explain_tab:
             self._show_explanations()
 
@@ -384,6 +415,40 @@ class FishScanApp:
             "well calibrated as the old model, within 0.01) chose **E2 + temperature** as the "
             "final freshness model. On the test set it scored 65.5% (old model: 62.8%).")
 
+    def _show_eye_check_report(self):
+        """How the 'Not recognized' check works and how well it did."""
+        st.subheader("Is it really a fish eye?")
+        st.markdown(
+            "Softmax always splits 100% among the 7 species it knows, so a photo of a hand "
+            "can still come out as \"Tilapia 99%\". Before showing a result, FishScan "
+            "therefore checks whether the photo **looks like the fish-eye photos it learned "
+            "from**:\n"
+            "1. The species model turns the photo into 1,280 feature numbers.\n"
+            "2. These are compared with the features of all 3,113 **training** eye photos, "
+            "and we take the average similarity of the **5 most similar** ones.\n"
+            "3. If the photo is farther away than **95% of real validation eye photos**, "
+            "the Scan page says **🚫 Not recognized** instead of giving percentages.")
+        results = load_eye_check_results()
+        if results is None:
+            st.info("No test results yet. Run `python scripts/test_eye_check.py`.")
+            return
+        rows = []
+        for group in results["groups"]:
+            should_pass = group["wrongly_rejected"] is not None
+            rate = group["wrongly_rejected"] if should_pass else group["caught"]
+            rows.append({
+                "Photos": group["group"],
+                "Should be": "accepted" if should_pass else "caught",
+                "Count": group["photos"],
+                "Result": (f"{rate:.1%} wrongly rejected" if should_pass
+                           else f"{rate:.1%} caught"),
+            })
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        st.caption("The cut-off was chosen on validation photos only; every group in this "
+                   "table was used only to report results, never to tune the check. "
+                   "Trade-off: a stricter cut-off catches more non-eye photos but also "
+                   "rejects more real (but unusual) eye photos.")
+
     def _show_explanations(self):
         st.subheader("How FishScan makes its percentages")
         st.markdown(
@@ -418,7 +483,8 @@ class FishScanApp:
             "- **Unknown things:** softmax always picks one of the classes it knows. A photo "
             "of something that is not a fish, or a species it was not trained on, can still "
             "get a high percentage. In our tests a plain colour gradient was called Yellow "
-            "Drum with 99%.\n"
+            "Drum with 99%. The fish-eye check (see its tab) catches many of these, but "
+            "not all.\n"
             "- **Photo quality:** dark, blurry or off-centre photos cause most mistakes.\n"
             "- **Freshness is visual only:** it cannot detect bacteria, chemicals or toxins.\n"
             "- **Dataset limits:** each freshness level was photographed on different days, "
@@ -466,8 +532,10 @@ class FishScanApp:
             "lapu-lapu are not included.\n"
             "- **It always picks an answer:** softmax forces a choice among the known classes, "
             "so a photo that is not a fish (or an unknown species) can still get a high, "
-            "confident-looking percentage. The Low confidence warning (below 60%) helps, but "
-            "does not catch every case.\n"
+            "confident-looking percentage. FishScan's fish-eye check (it compares the photo "
+            "with the training photos and says \"Not recognized\" when it is too different) "
+            "and the Low confidence warning (below 60%) catch many of these cases, but not "
+            "every one.\n"
             "- **Freshness is a visual estimate only:** a photo cannot detect bacteria, "
             "chemicals, toxins or how the fish was handled. It is not a lab test.\n"
             "- **Photo quality matters:** dark, blurry, off-centre or flash-glare photos cause "

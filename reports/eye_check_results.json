@@ -1,0 +1,33 @@
+{
+  "threshold": 0.23708677291870117,
+  "k": 5,
+  "groups": [
+    {
+      "group": "FFE test set",
+      "kind": "real fish eye (should pass)",
+      "photos": 664,
+      "recognized": 619,
+      "not_recognized": 45,
+      "wrongly_rejected": 0.0678,
+      "caught": null
+    },
+    {
+      "group": "Generated images",
+      "kind": "not a fish eye (should be caught)",
+      "photos": 40,
+      "recognized": 0,
+      "not_recognized": 40,
+      "wrongly_rejected": null,
+      "caught": 1.0
+    },
+    {
+      "group": "Extra folder: Philippines_Fish_Market_Dataset",
+      "kind": "not a fish eye (should be caught)",
+      "photos": 1813,
+      "recognized": 0,
+      "not_recognized": 1813,
+      "wrongly_rejected": null,
+      "caught": 1.0
+    }
+  ]
+}

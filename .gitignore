@@ -7,6 +7,8 @@
 #   reports/baseline/, and most of reports/experiments/
 #   *_examples.csv       (contain local file paths)
 #   scripts/, notebooks/ (training code stays on the laptop / Colab)
+#   data/not_fish_eye/, data/real_fish_eye/ (your own photos stay private)
+#   reports/eye_check_details.csv (file names of your photos)
 
 *
 
@@ -30,6 +32,8 @@
 !models/species_meta.joblib
 !models/freshness_model.keras
 !models/freshness_meta.joblib
+# fish-eye check (training features + cut-off), needed by the online app
+!models/eye_check.npz
 
 # --- reports used by the Model Performance page ---
 !reports/
@@ -40,6 +44,7 @@
 !reports/*_confusion_matrix.png
 !reports/*_training_curves.png
 !reports/*_examples.png
+!reports/eye_check_results.json
 # small tables that explain how the final freshness model was chosen
 !reports/experiments/
 !reports/experiments/comparison_val.csv
