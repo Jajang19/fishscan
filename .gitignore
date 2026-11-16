@@ -4,7 +4,7 @@
 #   data/raw/            (dataset images)
 #   .venv/               (local Python environment)
 #   models/experiments/  models/baseline/  models/quick_test/  checkpoints/
-#   reports/experiments/ reports/baseline/
+#   reports/baseline/, and most of reports/experiments/
 #   *_examples.csv       (contain local file paths)
 #   scripts/, notebooks/ (training code stays on the laptop / Colab)
 
@@ -40,6 +40,10 @@
 !reports/*_confusion_matrix.png
 !reports/*_training_curves.png
 !reports/*_examples.png
+# small tables that explain how the final freshness model was chosen
+!reports/experiments/
+!reports/experiments/comparison_val.csv
+!reports/experiments/temperature_scaling_half2.csv
 
 # never commit Python caches, even inside allowed folders
 __pycache__/

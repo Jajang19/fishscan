@@ -5,6 +5,8 @@ FishScan - Streamlit app (mobile-first).
   Scan page: take or upload a close-up photo of a fish's EYE, then see the
   species and freshness probabilities, a low-confidence warning, a rough
   freshness guide and a safety note.
+  Model Performance page: test-set results, charts and a plain-language
+  explanation of how the probabilities are made (read from reports/).
 
 The app only LOADS the saved models (models/*.keras); it never trains.
 The photo is analysed in memory and is never saved to disk.
@@ -16,19 +18,43 @@ Phone on the same Wi-Fi: open the "Network URL" that Streamlit prints.
 import hashlib
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import streamlit as st
 from PIL import Image, UnidentifiedImageError
 
 from src.fish_predictor import FishPredictor, scientific_names_by_species
+from src.model_evaluator import ModelEvaluator
 
 PROJECT_DIR = Path(__file__).resolve().parent
 MODELS_DIR = PROJECT_DIR / "models"
+REPORTS_DIR = PROJECT_DIR / "reports"
 
 
 @st.cache_resource(show_spinner="Loading the FishScan models...")
 def load_predictor():
     """Loads both models ONCE and keeps them in memory for every click and user."""
     return FishPredictor(MODELS_DIR)
+
+
+@st.cache_data
+def load_report(task):
+    """Reads the saved evaluation files for one model (cached after the first read)."""
+    return ModelEvaluator.load_saved_report(REPORTS_DIR, task)
+
+
+@st.cache_data
+def load_csv(name):
+    """Reads a small table from reports/experiments/, or None if it is missing."""
+    path = REPORTS_DIR / "experiments" / name
+    return pd.read_csv(path, index_col=0) if path.exists() else None
+
+
+def softmax(scores, temperature=1.0):
+    """The same formula the model's last layer uses (for the explanation tab)."""
+    scaled = np.asarray(scores, dtype=float) / temperature
+    exp = np.exp(scaled - scaled.max())
+    return exp / exp.sum()
 
 
 def format_scientific(name):
@@ -38,7 +64,8 @@ def format_scientific(name):
 
 
 class FishScanApp:
-    """The Streamlit user interface. It only calls FishPredictor; no model logic here."""
+    """The Streamlit user interface. It only calls FishPredictor (scanning) and
+    ModelEvaluator (saved results); no model logic here."""
 
     def __init__(self):
         st.set_page_config(page_title="FishScan", page_icon="🐟", layout="centered")
@@ -52,10 +79,13 @@ class FishScanApp:
     # Page layout
     # ------------------------------------------------------------------
     def run(self):
-        page = st.sidebar.radio("Menu", ["Scan", "Model Performance", "About"])
-        st.sidebar.caption("FishScan - IPT 102 final project")
+        # Menu at the top of the page (a sidebar is hidden behind a button on phones)
+        page = st.radio("Menu", ["Scan", "Model Performance", "About"],
+                        horizontal=True, label_visibility="collapsed", key="page")
         if page == "Scan":
             self.show_scan_page()
+        elif page == "Model Performance":
+            self.show_performance_page()
         else:
             st.title(page)
             st.info("This page is coming soon.")
@@ -197,6 +227,198 @@ class FishScanApp:
         st.caption("This is only a visual estimate based on how the dataset labels its photos. "
                    "The dataset does not say how its fish were stored, so FishScan cannot tell "
                    "you an exact number of hours or days left.")
+
+    # ------------------------------------------------------------------
+    # Model Performance page
+    # ------------------------------------------------------------------
+    def show_performance_page(self):
+        st.title("📊 Model Performance")
+        st.markdown("How well do FishScan's two models work? All numbers below come from the "
+                    "**test set: 664 eye photos the models never saw during training** "
+                    "(about 15% of the dataset, split so that crops of the same photo never "
+                    "appear in both training and testing).")
+
+        species_tab, freshness_tab, explain_tab = st.tabs(
+            ["🐟 Species", "🧊 Freshness", "💡 How to read this"])
+        with species_tab:
+            self._show_model_report(
+                "species", "Species model (7 classes)",
+                "Predicts which of the 7 species the eye belongs to.")
+        with freshness_tab:
+            self._show_model_report(
+                "freshness", "Freshness model (3 levels)",
+                "Predicts Highly Fresh (storage day 1-2), Fresh (day 3-4) or Not Fresh "
+                "(day 5-6), as defined by the FFE dataset.")
+            self._show_freshness_experiments()
+        with explain_tab:
+            self._show_explanations()
+
+    def _show_model_report(self, task, title, description):
+        report = load_report(task)
+        st.subheader(title)
+        st.caption(description)
+        if report is None:
+            st.warning(f"No saved results for the {task} model yet. "
+                       "Run `python scripts/evaluate.py` to create them in reports/.")
+            return
+        summary = report["summary"]
+
+        # Key numbers, two per row so they also fit on a phone
+        row1 = st.columns(2)
+        row1[0].metric("Accuracy", f"{summary['accuracy']:.1%}",
+                       help="Share of test photos where the top prediction was correct.")
+        row1[1].metric("Macro F1", f"{summary['macro_f1']:.2f}",
+                       help="Average F1 score of all classes, each class counting equally.")
+        row2 = st.columns(2)
+        row2[0].metric("Average confidence", f"{summary['average_confidence']:.1%}",
+                       help="Average top probability the model gave on the test photos.")
+        row2[1].metric("Calibration error (ECE)", f"{summary['ece']:.3f}",
+                       help="Average gap between confidence and real accuracy. Smaller is better.")
+
+        st.markdown(f"**Calibration verdict: {summary['calibration_verdict']}.** "
+                    f"{summary['calibration_explanation']}")
+        above = report["above_threshold"]
+        if above:
+            st.info(f"When this model is **at least 60% sure** ({above['share']:.0%} of the "
+                    f"test photos), it is right **{above['accuracy']:.0%}** of the time. "
+                    "Below 60%, the Scan page shows the ⚠️ Low confidence label.")
+        if summary["small_test_classes"]:
+            st.caption("Note: " + ", ".join(summary["small_test_classes"]) +
+                       " have fewer than 40 test photos, so their numbers are less reliable.")
+
+        if report["table"] is not None:
+            st.markdown("**Results per class**")
+            self._show_class_table(report["table"])
+
+        charts = report["charts"]
+        explanations = {
+            "confusion_matrix": ("Confusion matrix",
+                                 "Rows are the TRUE class, columns are what the model PREDICTED. "
+                                 "The diagonal (top-left to bottom-right) counts correct answers; "
+                                 "every other cell shows which classes get mixed up."),
+            "training_curves": ("Training curves",
+                                "Accuracy and loss after each training round (epoch) for the "
+                                "training and validation photos. The dotted line is where "
+                                "fine-tuning started. When validation stops improving while "
+                                "training keeps improving, the model starts memorising "
+                                "(overfitting), so training was stopped at the best epoch."),
+            "calibration": ("Calibration check (reliability diagram)",
+                            "Test photos are grouped by how confident the model was. Each bar is "
+                            "the real accuracy in that group. Bars on the dashed line = honest "
+                            "percentages; bars below it = overconfident; above it = "
+                            "underconfident. The small chart shows how many photos are in "
+                            "each group."),
+            "examples": ("Example predictions",
+                         "Top row: correct predictions. Bottom row: the most confident "
+                         "MISTAKES, with the top 3 probabilities. Many mistakes are dark or "
+                         "blurry photos, which is why the Scan page asks for a sharp, "
+                         "well-lit close-up."),
+        }
+        for key, (heading, text) in explanations.items():
+            if key in charts:
+                st.markdown(f"**{heading}**")
+                st.image(str(charts[key]), width="stretch")
+                st.caption(text)
+
+    def _show_class_table(self, table):
+        """Per-class precision / recall / F1 as percentages (class rows only)."""
+        rows = table.drop(index=["accuracy", "macro avg", "weighted avg"], errors="ignore")
+        shown = pd.DataFrame({
+            "Precision": rows["precision"].map("{:.0%}".format),
+            "Recall": rows["recall"].map("{:.0%}".format),
+            "F1": rows["f1-score"].map("{:.2f}".format),
+            "Test photos": rows["support"].astype(int),
+        })
+        st.dataframe(shown, width="stretch")
+        st.caption("**Precision**: when the model says this class, how often it is right. "
+                   "**Recall**: of the photos that really are this class, how many it found. "
+                   "**F1**: one number that balances both (1.00 = perfect).")
+
+    def _show_freshness_experiments(self):
+        """How the final freshness model was chosen (validation data only)."""
+        comparison = load_csv("comparison_val.csv")
+        scaling = load_csv("temperature_scaling_half2.csv")
+        if comparison is None and scaling is None:
+            return
+        # Friendlier row names for the tables
+        names = {"Baseline": "First model", "E1_species_aware": "E1 (21 classes)",
+                 "E2_deep_strong_aug": "E2 (deeper + strong augmentation)"}
+        comparison = comparison.rename(index=names) if comparison is not None else None
+        scaling = scaling.rename(index=names) if scaling is not None else None
+        st.divider()
+        st.subheader("How we improved the freshness model")
+        st.markdown(
+            "The first freshness model reached 62.8% test accuracy. We tried two "
+            "improvements and compared them **only on the validation photos**, so the test "
+            "set stayed untouched until the final check:\n"
+            "- **E1:** one model with 21 classes (species x freshness), adding up the "
+            "probabilities per freshness level.\n"
+            "- **E2:** deeper fine-tuning plus strong lighting and colour augmentation, so the "
+            "model relies less on the lighting of each photo session.")
+        if comparison is not None:
+            shown = pd.DataFrame({
+                "Validation accuracy": comparison["val_accuracy"].map("{:.1%}".format),
+                "Log loss": comparison["val_log_loss"].map("{:.3f}".format),
+                "Calibration error": comparison["val_ece"].map("{:.3f}".format),
+            })
+            st.dataframe(shown, width="stretch")
+            st.caption("Lower log loss and calibration error are better.")
+        st.markdown(
+            "E2 was the most accurate but **overconfident**. We fixed that with "
+            "**temperature scaling**: the model's scores are divided by one number T before "
+            "softmax. T was fitted on one half of the validation photos and checked on the "
+            "other half.")
+        if scaling is not None:
+            shown = pd.DataFrame({
+                "Accuracy": scaling["accuracy"].map("{:.1%}".format),
+                "Avg confidence": scaling["avg_confidence"].map("{:.1%}".format),
+                "Calibration error": scaling["ece"].map("{:.3f}".format),
+            })
+            st.dataframe(shown, width="stretch")
+        st.markdown(
+            "A rule we set **before** seeing these results (scaled E2 must be at least as "
+            "well calibrated as the old model, within 0.01) chose **E2 + temperature** as the "
+            "final freshness model. On the test set it scored 65.5% (old model: 62.8%).")
+
+    def _show_explanations(self):
+        st.subheader("How FishScan makes its percentages")
+        st.markdown(
+            "1. The photo is resized to 224 x 224 pixels and passed through **MobileNetV2**, a "
+            "network pre-trained on 1.4 million everyday photos (transfer learning). It turns "
+            "the eye into 1,280 numbers that describe shapes, colours and textures.\n"
+            "2. A small final layer gives every class a **score**.\n"
+            "3. **Softmax** turns the scores into probabilities that add up to 100%. "
+            "Bigger gaps between scores give more extreme percentages.")
+
+        scores = [4.0, 1.0, 0.5]
+        plain, softened = softmax(scores), softmax(scores, temperature=1.38)
+        example = pd.DataFrame({
+            "Score": scores,
+            "Softmax": [f"{p:.1%}" for p in plain],
+            "Softmax with T = 1.38": [f"{p:.1%}" for p in softened],
+        }, index=["Highly Fresh", "Fresh", "Not Fresh"])
+        st.markdown("**Example** (made-up scores):")
+        st.dataframe(example, width="stretch")
+        st.caption("Temperature scaling divides the scores by T before softmax. The order "
+                   "never changes (so the answer and the accuracy stay the same); only the "
+                   "confidence becomes more honest.")
+
+        st.subheader("What does \"87% Fresh\" mean?")
+        st.markdown(
+            "It is the model's **confidence**, not a lab measurement. A well-calibrated model "
+            "that says 87% is right about 87 out of 100 times it says that. The calibration "
+            "charts on the other tabs check exactly this.")
+
+        st.subheader("Where the percentages can be wrong")
+        st.markdown(
+            "- **Unknown things:** softmax always picks one of the classes it knows. A photo "
+            "of something that is not a fish, or a species it was not trained on, can still "
+            "get a high percentage. In our tests a plain colour gradient was called Yellow "
+            "Drum with 99%.\n"
+            "- **Photo quality:** dark, blurry or off-centre photos cause most mistakes.\n"
+            "- **Freshness is visual only:** it cannot detect bacteria, chemicals or toxins.\n"
+            "- **Dataset limits:** each freshness level was photographed on different days, "
+            "so lighting may have helped the model; the same fish appear on several days.")
 
 
 def main():

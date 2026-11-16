@@ -170,6 +170,50 @@ class ModelEvaluator:
         fig.savefig(self._out("calibration.png"), dpi=150)
         plt.close(fig)
 
+    # ------------------------------------------------------------------
+    # Reading saved results back (used by the app's Model Performance page)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def load_saved_report(reports_dir, task, threshold=0.60):
+        """Reads the files evaluate() saved for one task.
+
+        Returns a dictionary with the summary numbers, the per-class table,
+        the paths of the charts that exist, and how the model does on
+        predictions at or above the app's confidence threshold.
+        Returns None if the summary file is missing.
+        """
+        reports_dir = Path(reports_dir)
+        summary_path = reports_dir / f"{task}_summary.json"
+        if not summary_path.exists():
+            return None
+        with open(summary_path, encoding="utf-8") as f:
+            summary = json.load(f)
+
+        table_path = reports_dir / f"{task}_classification_report.csv"
+        table = pd.read_csv(table_path, index_col=0) if table_path.exists() else None
+
+        # Calibration bins are 10% wide ("60%-70%", ...), so "60% or more"
+        # is simply the bins that start at 60% or higher.
+        above = None
+        calibration_path = reports_dir / f"{task}_calibration.csv"
+        if calibration_path.exists():
+            bins = pd.read_csv(calibration_path)
+            low_edges = bins["bin"].str.split("-").str[0].str.rstrip("%").astype(float) / 100
+            confident = bins[low_edges >= threshold - 1e-9]
+            if confident["images"].sum() > 0:
+                above = {
+                    "share": float(confident["images"].sum() / bins["images"].sum()),
+                    "accuracy": float((confident["accuracy"] * confident["images"]).sum()
+                                      / confident["images"].sum()),
+                }
+
+        charts = {}
+        for name in ("confusion_matrix", "training_curves", "calibration", "examples"):
+            path = reports_dir / f"{task}_{name}.png"
+            if path.exists():
+                charts[name] = path
+        return {"summary": summary, "table": table, "charts": charts, "above_threshold": above}
+
     @staticmethod
     def expected_calibration_error(y_true, probabilities, n_bins=10):
         """ECE in one number (same bins as the calibration chart). Smaller is better."""
