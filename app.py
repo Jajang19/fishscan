@@ -23,12 +23,22 @@ import pandas as pd
 import streamlit as st
 from PIL import Image, UnidentifiedImageError
 
-from src.fish_predictor import FishPredictor, scientific_names_by_species
+from src.fish_predictor import FRESHNESS_GUIDE, FishPredictor, scientific_names_by_species
 from src.model_evaluator import ModelEvaluator
 
 PROJECT_DIR = Path(__file__).resolve().parent
 MODELS_DIR = PROJECT_DIR / "models"
 REPORTS_DIR = PROJECT_DIR / "reports"
+
+# Shown on the About page - replace with your real names
+DEVELOPERS = ["[YOUR FULL NAME]", "[PARTNER'S FULL NAME]"]
+
+PHOTO_TIPS = (
+    "- Take a **close-up of ONE eye**, filling most of the photo, with the eye in the **centre**.\n"
+    "- Use **good, even light** (daylight is best). Avoid flash glare and dark shadows.\n"
+    "- Hold the phone **steady** so the eye is sharp, not blurry.\n"
+    "- FishScan was trained on **bangus, tilapia, island mackerel, goldband goatfish, "
+    "yellow drum, leaftail croaker and fourfinger threadfin** only.")
 
 
 @st.cache_resource(show_spinner="Loading the FishScan models...")
@@ -87,8 +97,7 @@ class FishScanApp:
         elif page == "Model Performance":
             self.show_performance_page()
         else:
-            st.title(page)
-            st.info("This page is coming soon.")
+            self.show_about_page()
 
     def show_scan_page(self):
         st.title("🐟 FishScan")
@@ -129,12 +138,7 @@ class FishScanApp:
     # ------------------------------------------------------------------
     def _show_photo_tips(self):
         with st.expander("📸 How to take a good photo", expanded=False):
-            st.markdown(
-                "- Take a **close-up of ONE eye**, filling most of the photo, with the eye in the **centre**.\n"
-                "- Use **good, even light** (daylight is best). Avoid flash glare and dark shadows.\n"
-                "- Hold the phone **steady** so the eye is sharp, not blurry.\n"
-                "- FishScan was trained on **bangus, tilapia, island mackerel, goldband goatfish, "
-                "yellow drum, leaftail croaker and fourfinger threadfin** only.")
+            st.markdown(PHOTO_TIPS)
 
     def _get_image(self):
         """Returns (PIL image, hash) from the camera or the uploader, or (None, None)."""
@@ -419,6 +423,80 @@ class FishScanApp:
             "- **Freshness is visual only:** it cannot detect bacteria, chemicals or toxins.\n"
             "- **Dataset limits:** each freshness level was photographed on different days, "
             "so lighting may have helped the model; the same fish appear on several days.")
+
+    # ------------------------------------------------------------------
+    # About page
+    # ------------------------------------------------------------------
+    def show_about_page(self):
+        st.title("ℹ️ About FishScan")
+        st.markdown(
+            "FishScan looks at **one close-up photo of a fish's eye** and estimates two "
+            "things with machine learning:\n"
+            "1. **Which species** it is, as a probability for each of 7 species.\n"
+            "2. **How fresh** it looks, as a probability for each of 3 freshness levels.\n\n"
+            "It is meant to help buyers and sellers take a quick second look at fish, and to "
+            "show how a deep-learning model turns an image into meaningful probabilities.")
+        st.warning("**FishScan is a student project, NOT a food safety test.** Always check "
+                   "the smell, gills, skin and firmness yourself.")
+
+        st.subheader("📸 How to take a good photo")
+        st.markdown(PHOTO_TIPS)
+
+        st.subheader("🐟 Species FishScan knows")
+        rows = [{"Common name": common,
+                 "Scientific name": ", ".join(format_scientific(s) for s in scientific)}
+                for common, scientific in sorted(self._scientific.items())]
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        st.caption("Common names follow FishBase. Two tilapia species (Mozambique and Nile "
+                   "tilapia) are combined into one \"Tilapia\" class, because they cannot be "
+                   "told apart reliably from an eye photo.")
+
+        st.subheader("🧊 Freshness levels")
+        levels = [{"Level": f"{guide['icon']} {level}",
+                   "Meaning in the dataset": f"Fish photographed on {guide['dataset_days']}"}
+                  for level, guide in FRESHNESS_GUIDE.items()]
+        st.dataframe(pd.DataFrame(levels), hide_index=True, width="stretch")
+        st.caption("These definitions come from the dataset's documentation. The dataset does "
+                   "not say how the fish were stored, so the levels are not shelf-life numbers.")
+
+        st.subheader("⚠️ Known limitations")
+        st.markdown(
+            "- **Only what it was trained on:** 7 species and 3 freshness levels, from eye "
+            "close-ups. Common market fish such as galunggong, tulingan, dalagang bukid and "
+            "lapu-lapu are not included.\n"
+            "- **It always picks an answer:** softmax forces a choice among the known classes, "
+            "so a photo that is not a fish (or an unknown species) can still get a high, "
+            "confident-looking percentage. The Low confidence warning (below 60%) helps, but "
+            "does not catch every case.\n"
+            "- **Freshness is a visual estimate only:** a photo cannot detect bacteria, "
+            "chemicals, toxins or how the fish was handled. It is not a lab test.\n"
+            "- **Photo quality matters:** dark, blurry, off-centre or flash-glare photos cause "
+            "most mistakes.\n"
+            "- **Dataset limits:** each freshness level was photographed on different days, so "
+            "lighting may have helped the model; the same fish appear on several days; and "
+            "freshness accuracy is moderate (about 65% on test photos, see Model Performance).")
+
+        st.subheader("🔒 Privacy")
+        st.markdown("Your photo is analysed in memory and is **not saved** by FishScan.")
+
+        st.subheader("📚 Dataset and credits")
+        st.markdown(
+            "- **Dataset:** *The Freshness of the Fish Eyes (FFE) Dataset*, Mendeley Data, "
+            "[doi:10.17632/xzyx7pbr3w.1](https://doi.org/10.17632/xzyx7pbr3w.1), licensed "
+            "CC BY 4.0. Related article: Prasetyo, E., Purbaningtyas, R., Adityo, R.D., "
+            "Suciati, N., & Fatichah, C. (2022). *Combining MobileNetV1 and Depthwise "
+            "Separable Convolution Bottleneck with Expansion for Classifying the Freshness of "
+            "Fish Eyes.* Information Processing in Agriculture. "
+            "[doi:10.1016/j.inpa.2022.01.002](https://doi.org/10.1016/j.inpa.2022.01.002)\n"
+            "- **Model:** MobileNetV2 (pre-trained on ImageNet) with transfer learning, built "
+            "with TensorFlow / Keras.\n"
+            "- **Species names:** FishBase.\n"
+            "- **App:** Streamlit.")
+
+        st.subheader("👥 Developers")
+        st.markdown("\n".join(f"- {name}" for name in DEVELOPERS))
+        st.caption("IPT 102 - Integrative Programming and Technologies 2, final project "
+                   "(theme: Predicting Probabilities), 2026.")
 
 
 def main():
