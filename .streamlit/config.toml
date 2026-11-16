@@ -1,0 +1,13 @@
+# FishScan look and feel (ocean / teal theme)
+[theme]
+base = "light"
+primaryColor = "#0f766e"
+backgroundColor = "#f4fbfa"
+secondaryBackgroundColor = "#dff3f0"
+textColor = "#0b2e2e"
+
+[server]
+maxUploadSize = 15   # MB, enough for phone photos
+
+[browser]
+gatherUsageStats = false

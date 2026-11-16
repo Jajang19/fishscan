@@ -1,0 +1,12 @@
+{
+  "task": "freshness",
+  "test_images": 664,
+  "accuracy": 0.6551204819277109,
+  "macro_f1": 0.6488632383981221,
+  "average_confidence": 0.625904381275177,
+  "ece": 0.03424405921474996,
+  "confidence_minus_accuracy": -0.029216100652533883,
+  "calibration_verdict": "underconfident",
+  "calibration_explanation": "On average the model is 2.9% less confident than it is accurate, so it is right more often than its percentages say.",
+  "small_test_classes": []
+}

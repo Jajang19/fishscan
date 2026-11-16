@@ -1,0 +1,15 @@
+{
+  "task": "species",
+  "test_images": 664,
+  "accuracy": 0.9653614457831325,
+  "macro_f1": 0.9579229338851228,
+  "average_confidence": 0.9580615758895874,
+  "ece": 0.01832971434636284,
+  "confidence_minus_accuracy": -0.007299869893545141,
+  "calibration_verdict": "well calibrated",
+  "calibration_explanation": "The model's average confidence is within 2% of its real accuracy, so its percentages can be read roughly at face value.",
+  "small_test_classes": [
+    "Fourfinger Threadfin",
+    "Leaftail Croaker"
+  ]
+}

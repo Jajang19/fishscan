@@ -1,0 +1,46 @@
+# FishScan .gitignore - "allow list" style.
+# Everything is ignored by default; only the files the deployed app needs
+# are allowed back in below. This keeps OUT of GitHub, for example:
+#   data/raw/            (dataset images)
+#   .venv/               (local Python environment)
+#   models/experiments/  models/baseline/  models/quick_test/  checkpoints/
+#   reports/experiments/ reports/baseline/
+#   *_examples.csv       (contain local file paths)
+#   scripts/, notebooks/ (training code stays on the laptop / Colab)
+
+*
+
+# --- project files ---
+!.gitignore
+!README.md
+!requirements.txt
+!app.py
+
+# --- app code ---
+!src/
+!src/*.py
+
+# --- Streamlit theme ---
+!.streamlit/
+!.streamlit/config.toml
+
+# --- final models only (2 models + their metadata) ---
+!models/
+!models/species_model.keras
+!models/species_meta.joblib
+!models/freshness_model.keras
+!models/freshness_meta.joblib
+
+# --- reports used by the Model Performance page ---
+!reports/
+!reports/*_summary.json
+!reports/*_classification_report.csv
+!reports/*_calibration.csv
+!reports/*_calibration.png
+!reports/*_confusion_matrix.png
+!reports/*_training_curves.png
+!reports/*_examples.png
+
+# never commit Python caches, even inside allowed folders
+__pycache__/
+*.pyc

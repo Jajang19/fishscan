@@ -1,0 +1,28 @@
+# FishScan - pinned versions
+# Install the SAME file in Google Colab and on the laptop, so a model saved
+# in Colab loads on the laptop without version errors.
+#
+# Python: use 3.13 (TensorFlow 2.21 has wheels for Python 3.10-3.13 only,
+# NOT 3.14). Colab's current runtime also uses Python 3.13.
+
+# Deep learning (model is saved as .keras, which needs matching Keras 3)
+tensorflow==2.21.0
+keras==3.13.2
+
+# Data handling
+numpy==2.2.6
+pandas==2.3.3
+pillow==11.3.0
+
+# Metrics, splits, class weights
+scikit-learn==1.7.2
+
+# Charts
+matplotlib==3.10.7
+seaborn==0.13.2
+
+# Saving class names / metadata
+joblib==1.5.2
+
+# Web app
+streamlit==1.50.0
