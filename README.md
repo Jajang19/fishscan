@@ -7,7 +7,7 @@ learning, TensorFlow/Keras) with a Streamlit web app.
 IPT 102 (Integrative Programming and Technologies 2) final project -
 theme: *Predicting Probabilities*.
 
-Developers: [YOUR FULL NAME] and [PARTNER'S FULL NAME]
+Developers: Chavez, Jaylord E. and Dalumpines, Rozel G.
 
 ## What it does
 - **Species** probabilities for 7 classes: Bangus (Milkfish), Tilapia, Island Mackerel,

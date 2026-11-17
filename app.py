@@ -33,8 +33,8 @@ MODELS_DIR = PROJECT_DIR / "models"
 REPORTS_DIR = PROJECT_DIR / "reports"
 ASSETS_DIR = PROJECT_DIR / "assets"
 
-# Shown on the About page - replace with your real names
-DEVELOPERS = ["[YOUR FULL NAME]", "[PARTNER'S FULL NAME]"]
+# Shown on the About page
+DEVELOPERS = ["Chavez, Jaylord E.", "Dalumpines, Rozel G."]
 
 # Text colour on each freshness badge: dark text on the light amber badge, white on
 # green/red, so the label always has enough contrast to read
