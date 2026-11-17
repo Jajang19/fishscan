@@ -103,6 +103,9 @@ button[role="tab"][aria-selected="true"] p { color: var(--fs-primary); }
   background: var(--fs-primary); color: var(--fs-on-primary); border-color: var(--fs-primary);
 }
 
+/* The invisible frame that saves a scan to History takes no space */
+.st-key-history_saver { display: none; }
+
 /* ---------- 6. Photo input ---------- */
 /* Turn the "drag and drop" box into ONE big button (phones cannot drag files) */
 [class*="st-key-upload"] [data-testid="stFileUploaderDropzoneInstructions"] { display: none; }
@@ -185,6 +188,7 @@ button[role="tab"][aria-selected="true"] p { color: var(--fs-primary); }
 }
 /* Very small phones (about 320-360 px): tighter navigation text */
 @media (max-width: 360px) {
-  .st-key-nav button p { font-size: 0.82rem; }
+  .st-key-nav button { padding: 6px 1px; }
+  .st-key-nav button p { font-size: 0.72rem; }
   .fs-badge { font-size: 1rem; }
 }

@@ -23,9 +23,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image, UnidentifiedImageError
 
 from src.fish_predictor import FRESHNESS_GUIDE, FishPredictor, scientific_names_by_species
+from src.history_manager import HistoryManager
 from src.model_evaluator import ModelEvaluator
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -41,6 +43,7 @@ DEVELOPERS = ["Chavez, Jaylord E.", "Dalumpines, Rozel G."]
 BADGE_TEXT = {"Highly Fresh": "#ffffff", "Fresh": "#1f2937", "Not Fresh": "#ffffff"}
 
 PAGES = {"Scan": ":material/photo_camera: Scan",
+         "History": ":material/history: History",
          "Performance": ":material/insights: Performance",
          "About": ":material/info: About"}
 
@@ -141,13 +144,16 @@ class FishScanApp:
                            page_icon=str(ASSETS_DIR / "favicon.png"),
                            layout="wide", initial_sidebar_state="collapsed")
         # Our stylesheet: one file, injected once per page load
-        st.html(f"<style>{(ASSETS_DIR / 'style.css').read_text(encoding='utf-8')}</style>")
+        css = (ASSETS_DIR / "style.css").read_text(encoding="utf-8")
+        st.html(f"<style>{css}</style>")
         self._scientific = scientific_names_by_species()
+        self._history = HistoryManager(css)   # past scans, kept in the user's browser
         # Session state survives Streamlit's reruns (every click reruns the script)
         st.session_state.setdefault("input_key", 0)     # changing it clears the inputs
         st.session_state.setdefault("result", None)
         st.session_state.setdefault("image_hash", None)
         st.session_state.setdefault("last_page", "Scan")
+        st.session_state.setdefault("history_entry", None)  # the latest scan, to save in the browser
 
     # ------------------------------------------------------------------
     # Header and navigation
@@ -157,6 +163,8 @@ class FishScanApp:
         page = self._show_nav()
         if page == "Scan":
             self.show_scan_page()
+        elif page == "History":
+            self.show_history_page()
         elif page == "Performance":
             self.show_performance_page()
         else:
@@ -202,8 +210,15 @@ class FishScanApp:
             if image is not None and st.session_state.get("analyze_clicked"):
                 with st.spinner("Looking at the fish's eye..."):
                     st.session_state.result = predictor.predict(image)
+                # Remember this scan on the user's device (thumbnail + results only)
+                st.session_state.history_entry = self._history.make_entry(
+                    # id = the photo's fingerprint, so analyzing the same photo twice
+                    # does not create two history entries
+                    st.session_state.image_hash, image, st.session_state.result,
+                    self._card_html(st.session_state.result, predictor.threshold))
             if st.session_state.result is not None:
                 self._show_results(st.session_state.result, predictor.threshold)
+                self._save_to_history()
             elif image is not None:
                 with st.container(key="card_ready"):
                     st.html('<div class="fs-label">Ready</div><b>Photo loaded.</b> '
@@ -258,7 +273,8 @@ class FishScanApp:
                         st.rerun()
             else:
                 st.session_state.analyze_clicked = False
-            st.caption(":material/lock: Your photo is analysed in memory and is not saved.")
+            st.caption(":material/lock: Your photo is analysed in memory, not stored on our server. "
+                       "A small thumbnail and the result are kept in History on this device only.")
         return image, image_hash
 
     def _show_empty_state(self):
@@ -348,6 +364,35 @@ class FishScanApp:
                                "not say how its fish were stored, so this is not an exact "
                                "number of hours or days left.</span>"))
         return "".join(parts)
+
+    # ------------------------------------------------------------------
+    # History (stored in the user's browser by HistoryManager)
+    # ------------------------------------------------------------------
+    def _card_html(self, result, threshold):
+        """The result card saved with each scan, so History shows the same card."""
+        if result["eye_check"]["recognized"]:
+            return (self._species_html(result["species"], threshold)
+                    + self._freshness_html(result["freshness"], threshold))
+        return ('<div class="fs-big">🚫 Not recognized</div>'
+                '<p class="fs-muted">This photo did not look like a fish-eye close-up. '
+                "The model's guesses below are NOT real results.</p>"
+                + self._species_html(result["species"], threshold)
+                + self._freshness_html(result["freshness"], threshold))
+
+    def _save_to_history(self):
+        """Sends the latest scan to the browser. Invisible (height 0); safe to
+        repeat on every rerun because the browser ignores an id it already has."""
+        entry = st.session_state.history_entry
+        if entry is not None:
+            with st.container(key="history_saver"):
+                components.html(self._history.save_html(entry), height=0)
+
+    def show_history_page(self):
+        st.html('<div class="fs-page-title">History</div>'
+                '<div class="fs-muted">Your last 20 scans on this device, newest first. '
+                'Tap a scan to see its full result.</div>')
+        # The list is drawn by the browser itself from its own storage
+        components.html(self._history.page_html(), height=720, scrolling=True)
 
     # ------------------------------------------------------------------
     # Performance page
@@ -595,7 +640,9 @@ class FishScanApp:
                     "fish appear on several days; freshness accuracy is moderate (about 65%).")
             with st.container(key="card_privacy"):
                 st.html('<div class="fs-label">Privacy</div>'
-                        'Your photo is analysed in memory and is <b>not saved</b> by FishScan.')
+                        'Your photo is analysed in memory and is <b>not stored on the server</b>. '
+                        'A small thumbnail and the result are kept in <b>History on your own device '
+                        'only</b> (last 20 scans); you can delete them there at any time.')
             with st.container(key="card_credits"):
                 st.html('<div class="fs-label">Dataset and credits</div>')
                 st.markdown(
