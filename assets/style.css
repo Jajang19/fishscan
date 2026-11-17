@@ -1,0 +1,190 @@
+/* =====================================================================
+   FishScan stylesheet - the ONLY custom CSS in the app.
+   app.py loads this file once and injects it with st.html().
+   Sections:
+     1. Colour palette (light + dark)       5. Navigation bar
+     2. Hide Streamlit's own chrome          6. Photo input
+     3. Page width and spacing               7. Result parts (ring, bars, badge)
+     4. Cards and header                     8. Small screens
+   "st-key-xxx" classes come from Streamlit: any widget or container created
+   with key="xxx" gets that class, so we can style it without hacks.
+   ===================================================================== */
+
+/* ---------- 1. Colour palette ---------- */
+:root {
+  --fs-primary: #0f766e;        /* teal: buttons, rings, active tab */
+  --fs-primary-dark: #115e59;
+  --fs-primary-soft: #ccfbf1;
+  --fs-on-primary: #ffffff;     /* text on teal buttons */
+  --fs-bg: #f4fbfa;             /* page background */
+  --fs-card: #ffffff;
+  --fs-border: #d4ebe7;
+  --fs-muted: #5b7976;          /* secondary text */
+  --fs-track: #e2f1ee;          /* empty part of bars and rings */
+  --fs-green: #15803d;  --fs-amber: #b45309;  --fs-red: #b91c1c;
+  --fs-amber-soft: #fef3c7;  --fs-red-soft: #fee2e2;  --fs-blue-soft: #e0f2fe;
+  --fs-shadow: 0 2px 12px rgba(15, 60, 58, 0.08);
+  --fs-radius: 16px;
+}
+/* Same names, darker values: used automatically when the phone is in dark mode */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fs-primary: #2dd4bf;  --fs-primary-dark: #14b8a6;  --fs-primary-soft: #134e4a;
+    --fs-on-primary: #04201d;     /* dark text on the bright teal */
+    --fs-bg: #071a1d;  --fs-card: #0f2a2c;  --fs-border: #1f4644;
+    --fs-muted: #9cc2bd;  --fs-track: #1c3f3e;
+    --fs-green: #4ade80;  --fs-amber: #fbbf24;  --fs-red: #f87171;
+    --fs-amber-soft: #3b2a0a;  --fs-red-soft: #3f1515;  --fs-blue-soft: #0c2f44;
+    --fs-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  }
+}
+.stApp { background: var(--fs-bg); }
+
+/* ---------- 2. Hide Streamlit's own chrome (top bar, menu, deploy button) ---------- */
+[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"],
+[data-testid="stStatusWidget"], #MainMenu, footer { display: none !important; }
+
+/* ---------- 3. Page width and spacing ---------- */
+[data-testid="stMainBlockContainer"] {
+  max-width: 1100px;                      /* do not stretch on big monitors */
+  padding: 0.75rem 1.25rem 3rem;
+}
+
+/* ---------- 4. Cards and header ---------- */
+/* Every container created with key="card_..." becomes a card */
+[class*="st-key-card"] {
+  background: var(--fs-card);
+  border: 1px solid var(--fs-border);
+  border-radius: var(--fs-radius);
+  box-shadow: var(--fs-shadow);
+  padding: 1rem 1.1rem;
+}
+.fs-header { display: flex; align-items: center; gap: 0.75rem; padding: 0.25rem 0 0.5rem; }
+.fs-header img { width: 44px; height: 44px; border-radius: 12px; }
+.fs-header .fs-title { font-size: 1.45rem; font-weight: 800; line-height: 1.1; }
+.fs-header .fs-tagline { font-size: 0.85rem; color: var(--fs-muted); }
+.fs-label { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em;
+            text-transform: uppercase; color: var(--fs-muted); margin-bottom: 0.25rem; }
+.fs-muted { color: var(--fs-muted); font-size: 0.9rem; }
+.fs-page-title { font-size: clamp(1.4rem, 4vw, 2rem); font-weight: 800; margin: 0.25rem 0; }
+
+/* Teal accent for Streamlit's own widgets (no custom theme is set, see config.toml) */
+[data-testid="stBaseButton-primary"] {
+  background: var(--fs-primary); border-color: var(--fs-primary); color: var(--fs-on-primary);
+}
+[data-testid="stBaseButton-primary"]:hover { background: var(--fs-primary-dark); border-color: var(--fs-primary-dark); }
+[data-baseweb="tab-highlight"] { background-color: var(--fs-primary) !important; }
+button[role="tab"][aria-selected="true"] p { color: var(--fs-primary); }
+/* Big tap targets: every button at least 48 px high */
+.stButton button, [data-testid="stFileUploaderDropzone"] button { min-height: 48px; border-radius: 12px; }
+
+/* ---------- 5. Navigation bar (segmented control with key="nav") ---------- */
+.st-key-nav {
+  position: sticky; top: 0; z-index: 50;      /* stays visible while scrolling */
+  background: var(--fs-bg); padding: 0.35rem 0;
+}
+/* Same rules for the menu AND the Photo / Live camera switch:
+   buttons share the full width equally and keep their text label visible */
+.st-key-nav [data-testid="stButtonGroup"] > div,
+[class*="st-key-source"] [data-testid="stButtonGroup"] > div { width: 100%; flex-wrap: nowrap; }
+.st-key-nav button, [class*="st-key-source"] button {
+  flex: 1 1 33% !important; min-width: 0; min-height: 48px; font-weight: 600;
+}
+[class*="st-key-source"] button { flex-basis: 50% !important; }
+/* Menu buttons look like a phone app's tab bar: icon on top, small label below */
+.st-key-nav button { flex-direction: column; gap: 2px; padding: 6px 4px; min-height: 56px; }
+.st-key-nav button p { font-size: 0.8rem; }
+.st-key-nav button [data-testid="stMarkdownContainer"], .st-key-nav button p,
+[class*="st-key-source"] button [data-testid="stMarkdownContainer"],
+[class*="st-key-source"] button p { width: auto !important; }
+/* Active choice: teal button */
+.st-key-nav button[kind="segmented_controlActive"],
+[class*="st-key-source"] button[kind="segmented_controlActive"] {
+  background: var(--fs-primary); color: var(--fs-on-primary); border-color: var(--fs-primary);
+}
+
+/* ---------- 6. Photo input ---------- */
+/* Turn the "drag and drop" box into ONE big button (phones cannot drag files) */
+[class*="st-key-upload"] [data-testid="stFileUploaderDropzoneInstructions"] { display: none; }
+[class*="st-key-upload"] [data-testid="stFileUploaderDropzone"] {
+  padding: 0; background: transparent; border: none;
+}
+[class*="st-key-upload"] [data-testid="stFileUploaderDropzone"] > span { display: block; width: 100%; }
+[class*="st-key-upload"] [data-testid="stFileUploaderDropzone"] button {
+  width: 100%; min-height: 56px; background: var(--fs-primary); color: var(--fs-on-primary);
+  border: none; font-size: 0;                  /* hide the original "Browse files" text... */
+}
+[class*="st-key-upload"] [data-testid="stFileUploaderDropzone"] button::after {
+  content: "📷  Take or choose a photo";       /* ...and show our own label instead */
+  font-size: 1.05rem; font-weight: 600;
+}
+/* Images inside cards use the full card width (Streamlit otherwise shrinks
+   the image box inside our cards) */
+[class*="st-key-card"] [data-testid="stElementContainer"]:has([data-testid="stImage"]) { width: 100%; }
+[class*="st-key-card"] [data-testid="stImage"] img { width: 100% !important; }
+/* Photo preview: never taller than the screen */
+[class*="st-key-card_input"] img { max-height: 340px; object-fit: contain; border-radius: 12px; }
+[class*="st-key-card"] [data-testid="stImage"] { justify-content: center; }
+/* Sample photo in the empty state: small thumbnail */
+.st-key-card_empty [data-testid="stImage"] img {
+  max-width: 160px !important; max-height: 160px; border-radius: 12px;
+}
+
+/* ---------- 7. Result parts ---------- */
+.fs-result-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.fs-big { font-size: clamp(1.5rem, 5vw, 2.1rem); font-weight: 800; line-height: 1.15; }
+.fs-sci { font-style: italic; color: var(--fs-muted); }
+/* Confidence ring: conic-gradient fills --p percent of the circle */
+.fs-ring {
+  --size: 76px; flex: 0 0 var(--size); width: var(--size); height: var(--size); border-radius: 50%;
+  background: conic-gradient(var(--fs-primary) calc(var(--p) * 1%), var(--fs-track) 0);
+  display: grid; place-items: center;
+}
+.fs-ring span {
+  width: calc(var(--size) - 14px); height: calc(var(--size) - 14px); border-radius: 50%;
+  background: var(--fs-card); display: grid; place-items: center; font-weight: 800;
+}
+/* Horizontal probability bars: label and % are text, the bar is extra */
+.fs-bar { margin: 0.45rem 0; }
+.fs-bar-top { display: flex; justify-content: space-between; font-size: 0.92rem; }
+.fs-bar-track { height: 10px; background: var(--fs-track); border-radius: 99px; overflow: hidden; }
+.fs-bar-fill { height: 100%; background: var(--fs-primary); border-radius: 99px; }
+/* Freshness badge: colour + icon + text (never colour alone) */
+.fs-badge { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.9rem;
+            border-radius: 999px; color: var(--fs-on-primary); font-weight: 800; font-size: 1.15rem; }
+/* Small info notes: blue = info, amber = warning, red = problem */
+.fs-note { border-radius: 12px; padding: 0.7rem 0.85rem; margin: 0.6rem 0; font-size: 0.93rem;
+           background: var(--fs-blue-soft); }
+.fs-note.warn { background: var(--fs-amber-soft); border-left: 4px solid var(--fs-amber); }
+.fs-note.bad { background: var(--fs-red-soft); border-left: 4px solid var(--fs-red); }
+/* Grid of numbers on the Performance page: as many columns as fit */
+.fs-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.6rem; }
+.fs-stat { background: var(--fs-card); border: 1px solid var(--fs-border); border-radius: 14px;
+           padding: 0.7rem 0.8rem; box-shadow: var(--fs-shadow); }
+.fs-stat b { display: block; font-size: 1.45rem; }
+.fs-stat small { color: var(--fs-muted); }
+/* Simple two-line list rows (About page species list) */
+.fs-list-row { display: flex; flex-direction: column; padding: 0.45rem 0; border-bottom: 1px solid var(--fs-border); }
+.fs-list-row:last-child { border-bottom: none; }
+/* Images and charts always fit their box */
+[data-testid="stImage"] img { max-width: 100%; height: auto; }
+
+/* ---------- 8. Small screens (phones, up to 640 px wide) ---------- */
+@media (max-width: 640px) {
+  [data-testid="stMainBlockContainer"] { padding: 0.5rem 0.75rem 2.5rem; }
+  [class*="st-key-card"] { padding: 0.85rem 0.85rem; border-radius: 14px; }
+  .fs-header img { width: 38px; height: 38px; }
+  .fs-header .fs-title { font-size: 1.25rem; }
+  .fs-ring { --size: 64px; }
+  /* Columns are stacked on phones: keep the space between them small */
+  [data-testid="stHorizontalBlock"] { gap: 0.75rem !important; }
+}
+/* Phones in landscape (short screens): slimmer tab bar, icon beside the label */
+@media (max-height: 480px) {
+  .st-key-nav button { flex-direction: row; gap: 6px; min-height: 44px; }
+}
+/* Very small phones (about 320-360 px): tighter navigation text */
+@media (max-width: 360px) {
+  .st-key-nav button p { font-size: 0.82rem; }
+  .fs-badge { font-size: 1rem; }
+}

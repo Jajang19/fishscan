@@ -1,13 +1,15 @@
-# FishScan look and feel (ocean / teal theme)
-[theme]
-base = "light"
-primaryColor = "#0f766e"
-backgroundColor = "#f4fbfa"
-secondaryBackgroundColor = "#dff3f0"
-textColor = "#0b2e2e"
+# FishScan settings
+#
+# No [theme] section on purpose: in Streamlit 1.50 ANY custom theme locks the
+# app to one look, and separate light/dark themes are not supported yet.
+# Without a [theme], Streamlit follows the phone's light/dark setting, and our
+# teal colours come from assets/style.css (which has a light and a dark palette).
+
+[client]
+toolbarMode = "minimal"      # hide Streamlit's developer menu items (Deploy, rerun, ...)
 
 [server]
-maxUploadSize = 15   # MB, enough for phone photos
+maxUploadSize = 15           # MB, enough for phone photos
 
 [browser]
 gatherUsageStats = false

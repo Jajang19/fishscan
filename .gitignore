@@ -22,9 +22,16 @@
 !src/
 !src/*.py
 
-# --- Streamlit theme ---
+# --- Streamlit settings ---
 !.streamlit/
 !.streamlit/config.toml
+
+# --- look and feel: stylesheet, logo, favicon, sample eye photo ---
+!assets/
+!assets/style.css
+!assets/logo.png
+!assets/favicon.png
+!assets/sample_eye.jpg
 
 # --- final models only (2 models + their metadata) ---
 !models/

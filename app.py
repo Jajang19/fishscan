@@ -1,21 +1,22 @@
 """
 app.py
-FishScan - Streamlit app (mobile-first).
+FishScan - Streamlit app (mobile-first, responsive).
 
-  Scan page: take or upload a close-up photo of a fish's EYE, then see the
-  species and freshness probabilities, a low-confidence warning, a rough
-  freshness guide and a safety note.
-  Model Performance page: test-set results, charts and a plain-language
-  explanation of how the probabilities are made (read from reports/).
+  Scan:        take or choose a close-up photo of a fish's EYE and get species and
+               freshness probabilities, with Low-confidence and Not-recognized states.
+  Performance: test-set results, charts and how the probabilities work.
+  About:       what FishScan does, photo tips, limitations, credits.
 
 The app only LOADS the saved models (models/*.keras); it never trains.
 The photo is analysed in memory and is never saved to disk.
+All custom styling lives in assets/style.css (loaded once below).
 
 Run:  streamlit run app.py
-Phone on the same Wi-Fi: open the "Network URL" that Streamlit prints.
 """
 
+import base64
 import hashlib
+import html
 import json
 from pathlib import Path
 
@@ -30,18 +31,30 @@ from src.model_evaluator import ModelEvaluator
 PROJECT_DIR = Path(__file__).resolve().parent
 MODELS_DIR = PROJECT_DIR / "models"
 REPORTS_DIR = PROJECT_DIR / "reports"
+ASSETS_DIR = PROJECT_DIR / "assets"
 
 # Shown on the About page - replace with your real names
 DEVELOPERS = ["[YOUR FULL NAME]", "[PARTNER'S FULL NAME]"]
+
+# Text colour on each freshness badge: dark text on the light amber badge, white on
+# green/red, so the label always has enough contrast to read
+BADGE_TEXT = {"Highly Fresh": "#ffffff", "Fresh": "#1f2937", "Not Fresh": "#ffffff"}
+
+PAGES = {"Scan": ":material/photo_camera: Scan",
+         "Performance": ":material/insights: Performance",
+         "About": ":material/info: About"}
 
 PHOTO_TIPS = (
     "- Take a **close-up of ONE eye**, filling most of the photo, with the eye in the **centre**.\n"
     "- Use **good, even light** (daylight is best). Avoid flash glare and dark shadows.\n"
     "- Hold the phone **steady** so the eye is sharp, not blurry.\n"
-    "- FishScan was trained on **bangus, tilapia, island mackerel, goldband goatfish, "
-    "yellow drum, leaftail croaker and fourfinger threadfin** only.")
+    "- FishScan knows **bangus, tilapia, island mackerel, goldband goatfish, yellow drum, "
+    "leaftail croaker and fourfinger threadfin** only.")
 
 
+# ----------------------------------------------------------------------
+# Cached loaders (run once, then reused on every click)
+# ----------------------------------------------------------------------
 @st.cache_resource(show_spinner="Loading the FishScan models...")
 def load_predictor():
     """Loads both models ONCE and keeps them in memory for every click and user."""
@@ -71,6 +84,17 @@ def load_csv(name):
     return pd.read_csv(path, index_col=0) if path.exists() else None
 
 
+@st.cache_data
+def image_as_data_uri(filename):
+    """Small image from assets/ as text, so it can sit inside our HTML."""
+    data = (ASSETS_DIR / filename).read_bytes()
+    kind = "png" if filename.endswith(".png") else "jpeg"
+    return f"data:image/{kind};base64,{base64.b64encode(data).decode()}"
+
+
+# ----------------------------------------------------------------------
+# Small helpers that build HTML pieces (styled by assets/style.css)
+# ----------------------------------------------------------------------
 def softmax(scores, temperature=1.0):
     """The same formula the model's last layer uses (for the explanation tab)."""
     scaled = np.asarray(scores, dtype=float) / temperature
@@ -84,204 +108,265 @@ def format_scientific(name):
     return f"{genus} {species.lower()}"
 
 
+def ring_html(probability):
+    """Round confidence meter with the percentage written in the middle."""
+    percent = round(probability * 100)
+    return f'<div class="fs-ring" style="--p:{percent}"><span>{percent}%</span></div>'
+
+
+def bars_html(probabilities, limit=None, colors=None):
+    """One labelled bar per class: the name and % are text, the bar is extra."""
+    rows = []
+    for name, probability in list(probabilities.items())[:limit]:
+        color = f"background:{colors[name]};" if colors else ""
+        rows.append(
+            f'<div class="fs-bar"><div class="fs-bar-top"><span>{html.escape(name)}</span>'
+            f'<b>{probability:.1%}</b></div><div class="fs-bar-track">'
+            f'<div class="fs-bar-fill" style="width:{probability * 100:.1f}%;{color}"></div>'
+            f'</div></div>')
+    return "".join(rows)
+
+
+def note_html(text, kind=""):
+    """Small info card. kind: '' (info), 'warn' or 'bad'."""
+    return f'<div class="fs-note {kind}">{text}</div>'
+
+
 class FishScanApp:
     """The Streamlit user interface. It only calls FishPredictor (scanning) and
     ModelEvaluator (saved results); no model logic here."""
 
     def __init__(self):
-        st.set_page_config(page_title="FishScan", page_icon="🐟", layout="centered")
+        st.set_page_config(page_title="FishScan - fish eye scanner",
+                           page_icon=str(ASSETS_DIR / "favicon.png"),
+                           layout="wide", initial_sidebar_state="collapsed")
+        # Our stylesheet: one file, injected once per page load
+        st.html(f"<style>{(ASSETS_DIR / 'style.css').read_text(encoding='utf-8')}</style>")
         self._scientific = scientific_names_by_species()
         # Session state survives Streamlit's reruns (every click reruns the script)
         st.session_state.setdefault("input_key", 0)     # changing it clears the inputs
         st.session_state.setdefault("result", None)
         st.session_state.setdefault("image_hash", None)
+        st.session_state.setdefault("last_page", "Scan")
 
     # ------------------------------------------------------------------
-    # Page layout
+    # Header and navigation
     # ------------------------------------------------------------------
     def run(self):
-        # Menu at the top of the page (a sidebar is hidden behind a button on phones)
-        page = st.radio("Menu", ["Scan", "Model Performance", "About"],
-                        horizontal=True, label_visibility="collapsed", key="page")
+        self._show_header()
+        page = self._show_nav()
         if page == "Scan":
             self.show_scan_page()
-        elif page == "Model Performance":
+        elif page == "Performance":
             self.show_performance_page()
         else:
             self.show_about_page()
 
-    def show_scan_page(self):
-        st.title("🐟 FishScan")
-        st.markdown("**Check a fish's species and freshness from one photo of its eye.**")
+    def _show_header(self):
+        st.html(f'<div class="fs-header"><img src="{image_as_data_uri("logo.png")}" alt="">'
+                f'<div><div class="fs-title">FishScan</div>'
+                f'<div class="fs-tagline">Fish species &amp; freshness from one eye photo</div>'
+                f'</div></div>')
 
+    def _show_nav(self):
+        """App-style tab bar. A segmented control can be 'unselected', so we keep
+        the last page in that case."""
+        page = st.segmented_control("Menu", list(PAGES), format_func=PAGES.get,
+                                    default="Scan", key="nav", label_visibility="collapsed",
+                                    width="stretch")
+        if page is None:
+            page = st.session_state.last_page
+        st.session_state.last_page = page
+        return page
+
+    # ------------------------------------------------------------------
+    # Scan page
+    # ------------------------------------------------------------------
+    def show_scan_page(self):
         try:
             predictor = load_predictor()
         except FileNotFoundError as error:
-            st.error("The trained model files are missing, so FishScan cannot scan yet.")
-            st.caption(f"Details: {error}. Put the .keras and .joblib files in the models/ folder.")
+            st.html(note_html("<b>The trained model files are missing</b>, so FishScan "
+                              f"cannot scan yet. ({html.escape(str(error))})", "bad"))
             return
 
-        self._show_photo_tips()
-        image, image_hash = self._get_image()
-        if image is None:
-            return
-
-        # A new photo makes the old result invalid
-        if image_hash != st.session_state.image_hash:
-            st.session_state.result = None
+        # Two columns on tablets/laptops; Streamlit stacks them on phones
+        input_col, result_col = st.columns([5, 6], gap="large")
+        with input_col:
+            image, image_hash = self._show_input_card()
+        if image is not None and image_hash != st.session_state.image_hash:
+            st.session_state.result = None              # a new photo makes the old result invalid
             st.session_state.image_hash = image_hash
 
-        st.image(image, caption="Your photo", width=320)
-        if st.button("🔍 Analyze", type="primary", width="stretch"):
-            with st.spinner("Looking at the fish's eye..."):
-                st.session_state.result = predictor.predict(image)
+        with result_col:
+            if image is not None and st.session_state.get("analyze_clicked"):
+                with st.spinner("Looking at the fish's eye..."):
+                    st.session_state.result = predictor.predict(image)
+            if st.session_state.result is not None:
+                self._show_results(st.session_state.result, predictor.threshold)
+            elif image is not None:
+                with st.container(key="card_ready"):
+                    st.html('<div class="fs-label">Ready</div><b>Photo loaded.</b> '
+                            '<span class="fs-muted">Tap <b>Analyze</b> to see the species and '
+                            'freshness.</span>')
+            else:
+                self._show_empty_state()
 
-        if st.session_state.result is not None:
-            self._show_results(st.session_state.result, predictor.threshold)
-            if st.button("📷 Scan another fish", width="stretch"):
-                st.session_state.input_key += 1
-                st.session_state.result = None
-                st.session_state.image_hash = None
-                st.rerun()
-
-    # ------------------------------------------------------------------
-    # Input
-    # ------------------------------------------------------------------
-    def _show_photo_tips(self):
-        with st.expander("📸 How to take a good photo", expanded=False):
-            st.markdown(PHOTO_TIPS)
-
-    def _get_image(self):
-        """Returns (PIL image, hash) from the camera or the uploader, or (None, None)."""
+    def _show_input_card(self):
+        """Photo source switch, the big photo button, the preview and the buttons.
+        Returns (PIL image, hash) or (None, None)."""
         key = st.session_state.input_key
-        # Upload is the default: on a phone it also offers "Take photo", and it works
-        # even where the browser blocks the live camera (plain http over Wi-Fi).
-        method = st.radio("Photo source", ["🖼️ Upload / phone camera", "📷 Live camera"],
-                          horizontal=True, key=f"method_{key}")
-        if method.startswith("📷"):
-            photo = st.camera_input("Point the camera at the fish's eye", key=f"camera_{key}")
-            st.caption("If the live camera does not open, use **Upload / phone camera** instead - "
-                       "on a phone it lets you take a picture too.")
-        else:
-            photo = st.file_uploader("Choose or take a JPG or PNG photo", type=["jpg", "jpeg", "png"],
-                                     key=f"upload_{key}")
+        with st.container(key="card_input"):
+            st.html('<div class="fs-label">Your photo</div>')
+            # Upload is the default: on a phone it also offers the camera app, and it
+            # works even where the browser blocks the live camera.
+            source = st.segmented_control(
+                "Photo source", ["upload", "camera"], default="upload", key=f"source_{key}",
+                format_func={"upload": ":material/add_photo_alternate: Photo",
+                             "camera": ":material/videocam: Live camera"}.get,
+                label_visibility="collapsed", width="stretch")
+            if source == "camera":
+                photo = st.camera_input("Point the camera at the fish's eye",
+                                        key=f"camera_{key}", label_visibility="collapsed")
+                st.caption("If the live camera does not open, choose **Photo** - on a phone "
+                           "it lets you use the camera app too.")
+            else:
+                photo = st.file_uploader("Take or choose a photo", type=["jpg", "jpeg", "png"],
+                                         key=f"upload_{key}", label_visibility="collapsed")
 
-        if photo is None:
-            st.info("Take or upload a photo of a fish's eye to start.")
-            return None, None
+            image, image_hash = None, None
+            if photo is not None:
+                try:
+                    image = Image.open(photo)
+                    image.load()  # forces reading the whole file, so broken files fail here
+                    image_hash = hashlib.md5(photo.getvalue()).hexdigest()
+                except (UnidentifiedImageError, OSError):
+                    image = None
+                    st.html(note_html("<b>This file could not be opened as an image.</b> "
+                                      "Please try another JPG or PNG photo.", "bad"))
 
-        data = photo.getvalue()
-        try:
-            image = Image.open(photo)
-            image.load()  # forces reading the whole file, so broken files fail here
-        except (UnidentifiedImageError, OSError):
-            st.error("This file could not be opened as an image. Please try another JPG or PNG photo.")
-            return None, None
-        st.caption("🔒 Your photo is analysed in memory and is not saved.")
-        return image, hashlib.md5(data).hexdigest()
+            if image is not None:
+                st.image(image, width="stretch")
+                st.session_state.analyze_clicked = st.button(
+                    "Analyze", icon=":material/search:", type="primary", width="stretch")
+                if st.session_state.result is not None or st.session_state.analyze_clicked:
+                    if st.button("Scan another fish", icon=":material/restart_alt:",
+                                 width="stretch"):
+                        st.session_state.input_key += 1
+                        st.session_state.result = None
+                        st.session_state.image_hash = None
+                        st.rerun()
+            else:
+                st.session_state.analyze_clicked = False
+            st.caption(":material/lock: Your photo is analysed in memory and is not saved.")
+        return image, image_hash
+
+    def _show_empty_state(self):
+        """What a good photo looks like, before anything is chosen."""
+        with st.container(key="card_empty"):
+            st.html('<div class="fs-label">How to get a good result</div>')
+            left, right = st.columns([2, 3], vertical_alignment="center")
+            left.image(str(ASSETS_DIR / "sample_eye.jpg"), width="stretch")
+            right.markdown("**A good photo looks like this:** one sharp, well-lit eye that "
+                           "fills most of the picture.")
+            st.markdown(PHOTO_TIPS)
+            st.caption("Example photo: FFE dataset (Prasetyo et al., CC BY 4.0).")
 
     # ------------------------------------------------------------------
     # Results
     # ------------------------------------------------------------------
     def _show_results(self, result, threshold):
-        st.divider()
         eye_check = result["eye_check"]
         if not eye_check["recognized"]:
-            # The photo is not similar to any fish-eye photo the model learned from:
+            # Not similar to any fish-eye photo the model learned from:
             # do NOT show a confident-looking species/freshness answer.
-            st.error("### 🚫 Not recognized as a fish-eye close-up\n"
-                     "This photo does not look like the fish-eye photos FishScan was trained "
-                     "on, so its species and freshness percentages would not mean anything.\n\n"
-                     "**Try again:** a sharp, well-lit close-up of ONE fish eye, centred and "
-                     "filling most of the photo.")
-            with st.expander("Show the model's guesses anyway (for learning only)"):
-                st.caption("Softmax always splits 100% among the classes it knows, so even a "
-                           "photo of a hand gets a species. These numbers are NOT a real result.")
-                self._show_species(result["species"], threshold)
-                self._show_freshness(result["freshness"], threshold)
+            with st.container(key="card_unrecognized"):
+                st.html('<div class="fs-label">Result</div>'
+                        '<div class="fs-big">🚫 Not recognized</div>'
+                        '<p class="fs-muted">This photo does not look like the fish-eye '
+                        'close-ups FishScan was trained on, so species and freshness '
+                        'percentages would not mean anything.</p>'
+                        + note_html("<b>Try again:</b> a sharp, well-lit close-up of ONE fish "
+                                    "eye, centred and filling most of the photo.", "warn"))
+                with st.expander("Show the model's guesses anyway (for learning only)"):
+                    st.caption("Softmax always splits 100% among the classes it knows, so even "
+                               "a photo of a hand gets a species. These are NOT real results.")
+                    st.html(self._species_html(result["species"], threshold)
+                            + self._freshness_html(result["freshness"], threshold))
         else:
-            self._show_species(result["species"], threshold)
-            st.divider()
-            self._show_freshness(result["freshness"], threshold)
+            with st.container(key="card_species"):
+                st.html(self._species_html(result["species"], threshold))
+            with st.container(key="card_freshness"):
+                st.html(self._freshness_html(result["freshness"], threshold))
         if not eye_check["available"]:
-            st.caption("(The fish-eye check file models/eye_check.npz was not found, so this "
-                       "photo was not checked.)")
-        st.divider()
-        st.info("**Safety note:** fish that smells sour or ammonia-like, has slimy or dull skin, "
-                "grey or brown gills, or soft flesh that does not spring back should not be eaten, "
-                "whatever this app says. Keep fish cold and cook it thoroughly.")
-        st.caption("⚠️ FishScan is a student machine-learning project, NOT a food safety test. "
-                   "A photo cannot detect bacteria, chemicals or toxins.")
+            st.caption("(The fish-eye check file was not found, so this photo was not checked.)")
+        with st.container(key="card_safety"):
+            st.html(note_html("<b>Safety note:</b> fish that smells sour or ammonia-like, has "
+                              "slimy or dull skin, grey or brown gills, or soft flesh that does "
+                              "not spring back should not be eaten, whatever this app says. "
+                              "Keep fish cold and cook it thoroughly.")
+                    + '<div class="fs-muted">⚠️ FishScan is a student machine-learning project, '
+                      'NOT a food safety test. A photo cannot detect bacteria, chemicals or '
+                      'toxins.</div>')
 
-    def _low_confidence_box(self, what, probability, threshold):
-        """The 'Low confidence' label with a tip (probabilities are still shown below it)."""
-        st.warning(f"**⚠️ Low confidence** - the top {what} is only {probability:.0%} "
-                   f"(below {threshold:.0%}). Treat this result as a guess.\n\n"
-                   "**Tip:** retake a sharper, well-lit close-up of the eye, centred in the photo.")
+    def _low_confidence_html(self, what, probability, threshold):
+        return note_html(f"<b>⚠️ Low confidence</b> - the top {what} is only "
+                         f"{probability:.0%} (below {threshold:.0%}), so treat it as a guess. "
+                         "<b>Tip:</b> retake a sharper, well-lit close-up of the eye.", "warn")
 
-    def _show_bars(self, probabilities, limit=None):
-        """One labelled bar per class (text + percentage, so colour is never needed)."""
-        for name, probability in list(probabilities.items())[:limit]:
-            st.progress(min(max(probability, 0.0), 1.0), text=f"{name}: {probability:.1%}")
-
-    def _show_species(self, species, threshold):
-        st.subheader("Species")
+    def _species_html(self, species, threshold):
         name = species["top_class"]
         scientific = ", ".join(format_scientific(s) for s in self._scientific.get(name, []))
+        heading = "Best guess" if species["low_confidence"] else "Species"
+        parts = [f'<div class="fs-label">{heading}</div>',
+                 f'<div class="fs-result-top"><div><div class="fs-big">{html.escape(name)}</div>'
+                 f'<div class="fs-sci">{html.escape(scientific)}</div></div>'
+                 f'{ring_html(species["top_probability"])}</div>']
         if species["low_confidence"]:
-            self._low_confidence_box("species", species["top_probability"], threshold)
-            st.markdown(f"Best guess: **{name}** ({species['top_probability']:.0%})")
-        else:
-            st.markdown(f"## {name} - {species['top_probability']:.0%}")
-        st.caption(f"Scientific name: *{scientific}*")
-        st.markdown("**Top 3 species**")
-        self._show_bars(species["probabilities"], limit=3)
+            parts.append(self._low_confidence_html("species", species["top_probability"], threshold))
+        parts.append('<div class="fs-label" style="margin-top:.8rem">Top 3 species</div>')
+        parts.append(bars_html(species["probabilities"], limit=3))
+        return "".join(parts)
 
-    def _show_freshness(self, freshness, threshold):
-        st.subheader("Freshness")
-        level = freshness["top_class"]
-        guide = freshness["guide"]
-        if freshness["low_confidence"]:
-            self._low_confidence_box("freshness level", freshness["top_probability"], threshold)
-            st.markdown(f"Best guess: {guide['icon']} **{level}** ({freshness['top_probability']:.0%})")
-        else:
-            # Coloured label, but the text says the level too (colour is never the only cue)
-            st.markdown(
-                f"<div style='background:{guide['color']};color:white;padding:0.6rem 1rem;"
-                f"border-radius:0.6rem;font-size:1.4rem;font-weight:700;'>"
-                f"{guide['icon']} {level} - {freshness['top_probability']:.0%}</div>",
-                unsafe_allow_html=True)
-        st.markdown("**All freshness levels**")
-        self._show_bars(freshness["probabilities"])
-
+    def _freshness_html(self, freshness, threshold):
+        level, guide = freshness["top_class"], freshness["guide"]
+        heading = "Freshness - best guess" if freshness["low_confidence"] else "Freshness"
+        colors = {name: info["color"] for name, info in FRESHNESS_GUIDE.items()}
         prefix = "Only if this guess is right: " if freshness["low_confidence"] else ""
-        st.markdown(f"**Rough guide (estimate):** {prefix}the eye looks like fish on "
-                    f"**{guide['dataset_days']}** in the FFE dataset. {guide['advice']}")
-        st.caption("This is only a visual estimate based on how the dataset labels its photos. "
-                   "The dataset does not say how its fish were stored, so FishScan cannot tell "
-                   "you an exact number of hours or days left.")
+        parts = [f'<div class="fs-label">{heading}</div>',
+                 # Badge = colour + icon + TEXT, so it never relies on colour alone
+                 f'<span class="fs-badge" style="background:{guide["color"]};color:{BADGE_TEXT[level]}">{guide["icon"]} '
+                 f'{html.escape(level)} · {freshness["top_probability"]:.0%}</span>']
+        if freshness["low_confidence"]:
+            parts.append(self._low_confidence_html("freshness level",
+                                                   freshness["top_probability"], threshold))
+        parts.append('<div class="fs-label" style="margin-top:.8rem">All levels</div>')
+        parts.append(bars_html(freshness["probabilities"], colors=colors))
+        parts.append(note_html(f"<b>Rough guide (estimate):</b> {prefix}the eye looks like fish "
+                               f"on <b>{guide['dataset_days']}</b> in the FFE dataset. "
+                               f"{guide['advice']}<br><span class='fs-muted'>The dataset does "
+                               "not say how its fish were stored, so this is not an exact "
+                               "number of hours or days left.</span>"))
+        return "".join(parts)
 
     # ------------------------------------------------------------------
-    # Model Performance page
+    # Performance page
     # ------------------------------------------------------------------
     def show_performance_page(self):
-        st.title("📊 Model Performance")
-        st.markdown("How well do FishScan's two models work? All numbers below come from the "
-                    "**test set: 664 eye photos the models never saw during training** "
-                    "(about 15% of the dataset, split so that crops of the same photo never "
-                    "appear in both training and testing).")
-
+        st.html('<div class="fs-page-title">Model performance</div>'
+                '<div class="fs-muted">All numbers come from the <b>test set: 664 eye photos the '
+                'models never saw during training</b>, split so that crops of the same photo '
+                'never appear in both training and testing.</div>')
         species_tab, freshness_tab, check_tab, explain_tab = st.tabs(
-            ["🐟 Species", "🧊 Freshness", "🚫 Fish-eye check", "💡 How to read this"])
+            ["Species", "Freshness", "Eye check", "How it works"])
         with species_tab:
-            self._show_model_report(
-                "species", "Species model (7 classes)",
-                "Predicts which of the 7 species the eye belongs to.")
+            self._show_model_report("species", "Species model · 7 classes",
+                                    "Which of the 7 species the eye belongs to.")
         with freshness_tab:
             self._show_model_report(
-                "freshness", "Freshness model (3 levels)",
-                "Predicts Highly Fresh (storage day 1-2), Fresh (day 3-4) or Not Fresh "
-                "(day 5-6), as defined by the FFE dataset.")
+                "freshness", "Freshness model · 3 levels",
+                "Highly Fresh (storage day 1-2), Fresh (day 3-4) or Not Fresh (day 5-6), "
+                "as defined by the FFE dataset.")
             self._show_freshness_experiments()
         with check_tab:
             self._show_eye_check_report()
@@ -290,70 +375,64 @@ class FishScanApp:
 
     def _show_model_report(self, task, title, description):
         report = load_report(task)
-        st.subheader(title)
-        st.caption(description)
+        st.html(f'<div class="fs-page-title" style="font-size:1.25rem">{title}</div>'
+                f'<div class="fs-muted">{description}</div>')
         if report is None:
-            st.warning(f"No saved results for the {task} model yet. "
-                       "Run `python scripts/evaluate.py` to create them in reports/.")
+            st.html(note_html(f"No saved results for the {task} model yet. "
+                              "Run <code>python scripts/evaluate.py</code>.", "warn"))
             return
         summary = report["summary"]
+        stats = [("Accuracy", f"{summary['accuracy']:.1%}", "top prediction correct"),
+                 ("Macro F1", f"{summary['macro_f1']:.2f}", "all classes count equally"),
+                 ("Avg confidence", f"{summary['average_confidence']:.1%}", "average top probability"),
+                 ("Calibration error", f"{summary['ece']:.3f}", "smaller is better")]
+        st.html('<div class="fs-stats">' + "".join(
+            f'<div class="fs-stat"><small>{label}</small><b>{value}</b><small>{hint}</small></div>'
+            for label, value, hint in stats) + "</div>")
 
-        # Key numbers, two per row so they also fit on a phone
-        row1 = st.columns(2)
-        row1[0].metric("Accuracy", f"{summary['accuracy']:.1%}",
-                       help="Share of test photos where the top prediction was correct.")
-        row1[1].metric("Macro F1", f"{summary['macro_f1']:.2f}",
-                       help="Average F1 score of all classes, each class counting equally.")
-        row2 = st.columns(2)
-        row2[0].metric("Average confidence", f"{summary['average_confidence']:.1%}",
-                       help="Average top probability the model gave on the test photos.")
-        row2[1].metric("Calibration error (ECE)", f"{summary['ece']:.3f}",
-                       help="Average gap between confidence and real accuracy. Smaller is better.")
-
-        st.markdown(f"**Calibration verdict: {summary['calibration_verdict']}.** "
-                    f"{summary['calibration_explanation']}")
+        text = (f"<b>Calibration: {summary['calibration_verdict']}.</b> "
+                f"{summary['calibration_explanation']}")
         above = report["above_threshold"]
         if above:
-            st.info(f"When this model is **at least 60% sure** ({above['share']:.0%} of the "
-                    f"test photos), it is right **{above['accuracy']:.0%}** of the time. "
-                    "Below 60%, the Scan page shows the ⚠️ Low confidence label.")
+            text += (f"<br>When at least 60% sure ({above['share']:.0%} of test photos), it is "
+                     f"right <b>{above['accuracy']:.0%}</b> of the time. Below 60%, the Scan "
+                     "page shows ⚠️ Low confidence.")
         if summary["small_test_classes"]:
-            st.caption("Note: " + ", ".join(summary["small_test_classes"]) +
-                       " have fewer than 40 test photos, so their numbers are less reliable.")
+            text += ("<br><span class='fs-muted'>" + ", ".join(summary["small_test_classes"]) +
+                     " have fewer than 40 test photos, so their numbers are less reliable.</span>")
+        st.html(note_html(text))
 
         if report["table"] is not None:
-            st.markdown("**Results per class**")
-            self._show_class_table(report["table"])
+            with st.container(key=f"card_table_{task}"):
+                st.html('<div class="fs-label">Results per class</div>')
+                self._show_class_table(report["table"])
 
         charts = report["charts"]
         explanations = {
             "confusion_matrix": ("Confusion matrix",
-                                 "Rows are the TRUE class, columns are what the model PREDICTED. "
-                                 "The diagonal (top-left to bottom-right) counts correct answers; "
-                                 "every other cell shows which classes get mixed up."),
+                                 "Rows = TRUE class, columns = PREDICTED class. The diagonal "
+                                 "counts correct answers; other cells show mix-ups."),
+            "calibration": ("Calibration check",
+                            "Photos grouped by confidence; each bar is the real accuracy in that "
+                            "group. On the dashed line = honest percentages; below = "
+                            "overconfident; above = underconfident."),
             "training_curves": ("Training curves",
-                                "Accuracy and loss after each training round (epoch) for the "
-                                "training and validation photos. The dotted line is where "
-                                "fine-tuning started. When validation stops improving while "
-                                "training keeps improving, the model starts memorising "
-                                "(overfitting), so training was stopped at the best epoch."),
-            "calibration": ("Calibration check (reliability diagram)",
-                            "Test photos are grouped by how confident the model was. Each bar is "
-                            "the real accuracy in that group. Bars on the dashed line = honest "
-                            "percentages; bars below it = overconfident; above it = "
-                            "underconfident. The small chart shows how many photos are in "
-                            "each group."),
+                                "Accuracy and loss per epoch. Dotted line = fine-tuning starts. "
+                                "Training stopped at the best validation epoch to avoid "
+                                "overfitting."),
             "examples": ("Example predictions",
-                         "Top row: correct predictions. Bottom row: the most confident "
-                         "MISTAKES, with the top 3 probabilities. Many mistakes are dark or "
-                         "blurry photos, which is why the Scan page asks for a sharp, "
-                         "well-lit close-up."),
+                         "Top: correct. Bottom: the most confident mistakes - often dark or "
+                         "blurry photos."),
         }
-        for key, (heading, text) in explanations.items():
-            if key in charts:
-                st.markdown(f"**{heading}**")
-                st.image(str(charts[key]), width="stretch")
-                st.caption(text)
+        available = [(k, v) for k, v in explanations.items() if k in charts]
+        # Two charts per row on wide screens; Streamlit stacks them on phones
+        for start in range(0, len(available), 2):
+            columns = st.columns(2, gap="medium")
+            for column, (key, (heading, text)) in zip(columns, available[start:start + 2]):
+                with column, st.container(key=f"card_chart_{task}_{key}"):
+                    st.html(f'<div class="fs-label">{heading}</div>')
+                    st.image(str(charts[key]), width="stretch")
+                    st.caption(text)
 
     def _show_class_table(self, table):
         """Per-class precision / recall / F1 as percentages (class rows only)."""
@@ -362,12 +441,12 @@ class FishScanApp:
             "Precision": rows["precision"].map("{:.0%}".format),
             "Recall": rows["recall"].map("{:.0%}".format),
             "F1": rows["f1-score"].map("{:.2f}".format),
-            "Test photos": rows["support"].astype(int),
+            "Photos": rows["support"].astype(int),
         })
         st.dataframe(shown, width="stretch")
-        st.caption("**Precision**: when the model says this class, how often it is right. "
-                   "**Recall**: of the photos that really are this class, how many it found. "
-                   "**F1**: one number that balances both (1.00 = perfect).")
+        st.caption("**Precision**: when it says this class, how often it is right. "
+                   "**Recall**: of the photos really in this class, how many it found. "
+                   "**F1**: balances both (1.00 = perfect).")
 
     def _show_freshness_experiments(self):
         """How the final freshness model was chosen (validation data only)."""
@@ -375,196 +454,165 @@ class FishScanApp:
         scaling = load_csv("temperature_scaling_half2.csv")
         if comparison is None and scaling is None:
             return
-        # Friendlier row names for the tables
         names = {"Baseline": "First model", "E1_species_aware": "E1 (21 classes)",
                  "E2_deep_strong_aug": "E2 (deeper + strong augmentation)"}
-        comparison = comparison.rename(index=names) if comparison is not None else None
-        scaling = scaling.rename(index=names) if scaling is not None else None
-        st.divider()
-        st.subheader("How we improved the freshness model")
-        st.markdown(
-            "The first freshness model reached 62.8% test accuracy. We tried two "
-            "improvements and compared them **only on the validation photos**, so the test "
-            "set stayed untouched until the final check:\n"
-            "- **E1:** one model with 21 classes (species x freshness), adding up the "
-            "probabilities per freshness level.\n"
-            "- **E2:** deeper fine-tuning plus strong lighting and colour augmentation, so the "
-            "model relies less on the lighting of each photo session.")
-        if comparison is not None:
-            shown = pd.DataFrame({
-                "Validation accuracy": comparison["val_accuracy"].map("{:.1%}".format),
-                "Log loss": comparison["val_log_loss"].map("{:.3f}".format),
-                "Calibration error": comparison["val_ece"].map("{:.3f}".format),
-            })
-            st.dataframe(shown, width="stretch")
-            st.caption("Lower log loss and calibration error are better.")
-        st.markdown(
-            "E2 was the most accurate but **overconfident**. We fixed that with "
-            "**temperature scaling**: the model's scores are divided by one number T before "
-            "softmax. T was fitted on one half of the validation photos and checked on the "
-            "other half.")
-        if scaling is not None:
-            shown = pd.DataFrame({
-                "Accuracy": scaling["accuracy"].map("{:.1%}".format),
-                "Avg confidence": scaling["avg_confidence"].map("{:.1%}".format),
-                "Calibration error": scaling["ece"].map("{:.3f}".format),
-            })
-            st.dataframe(shown, width="stretch")
-        st.markdown(
-            "A rule we set **before** seeing these results (scaled E2 must be at least as "
-            "well calibrated as the old model, within 0.01) chose **E2 + temperature** as the "
-            "final freshness model. On the test set it scored 65.5% (old model: 62.8%).")
+        with st.container(key="card_experiments"):
+            st.html('<div class="fs-label">How we improved the freshness model</div>')
+            st.markdown(
+                "The first freshness model reached 62.8% test accuracy. We tried two "
+                "improvements and compared them **only on validation photos**:\n"
+                "- **E1:** 21 classes (species x freshness), adding up probabilities per level.\n"
+                "- **E2:** deeper fine-tuning + strong lighting/colour augmentation.")
+            if comparison is not None:
+                comparison = comparison.rename(index=names)
+                st.dataframe(pd.DataFrame({
+                    "Val. accuracy": comparison["val_accuracy"].map("{:.1%}".format),
+                    "Log loss": comparison["val_log_loss"].map("{:.3f}".format),
+                    "Calibration err.": comparison["val_ece"].map("{:.3f}".format),
+                }), width="stretch")
+            st.markdown("E2 was the most accurate but **overconfident**, so we added "
+                        "**temperature scaling** (divide the scores by T before softmax), "
+                        "fitted on one half of the validation photos and checked on the other.")
+            if scaling is not None:
+                scaling = scaling.rename(index=names)
+                st.dataframe(pd.DataFrame({
+                    "Accuracy": scaling["accuracy"].map("{:.1%}".format),
+                    "Avg confidence": scaling["avg_confidence"].map("{:.1%}".format),
+                    "Calibration err.": scaling["ece"].map("{:.3f}".format),
+                }), width="stretch")
+            st.markdown("A rule set **before** seeing these results chose **E2 + temperature** "
+                        "as the final model. Test accuracy: 65.5% (first model: 62.8%).")
 
     def _show_eye_check_report(self):
         """How the 'Not recognized' check works and how well it did."""
-        st.subheader("Is it really a fish eye?")
-        st.markdown(
-            "Softmax always splits 100% among the 7 species it knows, so a photo of a hand "
-            "can still come out as \"Tilapia 99%\". Before showing a result, FishScan "
-            "therefore checks whether the photo **looks like the fish-eye photos it learned "
-            "from**:\n"
-            "1. The species model turns the photo into 1,280 feature numbers.\n"
-            "2. These are compared with the features of all 3,113 **training** eye photos, "
-            "and we take the average similarity of the **5 most similar** ones.\n"
-            "3. If the photo is farther away than **95% of real validation eye photos**, "
-            "the Scan page says **🚫 Not recognized** instead of giving percentages.")
-        results = load_eye_check_results()
-        if results is None:
-            st.info("No test results yet. Run `python scripts/test_eye_check.py`.")
-            return
-        rows = []
-        for group in results["groups"]:
-            should_pass = group["wrongly_rejected"] is not None
-            rate = group["wrongly_rejected"] if should_pass else group["caught"]
-            rows.append({
-                "Photos": group["group"],
-                "Should be": "accepted" if should_pass else "caught",
-                "Count": group["photos"],
-                "Result": (f"{rate:.1%} wrongly rejected" if should_pass
-                           else f"{rate:.1%} caught"),
-            })
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-        st.caption("The cut-off was chosen on validation photos only; every group in this "
-                   "table was used only to report results, never to tune the check. "
-                   "Trade-off: a stricter cut-off catches more non-eye photos but also "
-                   "rejects more real (but unusual) eye photos.")
+        with st.container(key="card_eyecheck"):
+            st.html('<div class="fs-label">Is it really a fish eye?</div>')
+            st.markdown(
+                "Softmax always splits 100% among the 7 known species, so a photo of a hand "
+                "can still come out as \"Tilapia 99%\". FishScan first checks whether the photo "
+                "**looks like the eye photos it learned from**:\n"
+                "1. The species model turns the photo into 1,280 feature numbers.\n"
+                "2. They are compared with all 3,113 **training** eye photos (average similarity "
+                "of the **5 most similar**).\n"
+                "3. Farther away than **95% of real validation eye photos** → "
+                "**🚫 Not recognized**.")
+            results = load_eye_check_results()
+            if results is None:
+                st.info("No test results yet. Run `python scripts/test_eye_check.py`.")
+                return
+            rows = []
+            for group in results["groups"]:
+                should_pass = group["wrongly_rejected"] is not None
+                rate = group["wrongly_rejected"] if should_pass else group["caught"]
+                rows.append({"Photos": group["group"].replace("Extra folder: ", ""),
+                             "Should be": "accepted" if should_pass else "caught",
+                             "Count": group["photos"],
+                             "Result": (f"{rate:.1%} wrongly rejected" if should_pass
+                                        else f"{rate:.1%} caught")})
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+            st.caption("The cut-off was chosen on validation photos only; these groups were "
+                       "used only for reporting. Stricter cut-off = more non-eye photos caught, "
+                       "but more real (unusual) eye photos rejected.")
 
     def _show_explanations(self):
-        st.subheader("How FishScan makes its percentages")
-        st.markdown(
-            "1. The photo is resized to 224 x 224 pixels and passed through **MobileNetV2**, a "
-            "network pre-trained on 1.4 million everyday photos (transfer learning). It turns "
-            "the eye into 1,280 numbers that describe shapes, colours and textures.\n"
-            "2. A small final layer gives every class a **score**.\n"
-            "3. **Softmax** turns the scores into probabilities that add up to 100%. "
-            "Bigger gaps between scores give more extreme percentages.")
-
-        scores = [4.0, 1.0, 0.5]
-        plain, softened = softmax(scores), softmax(scores, temperature=1.38)
-        example = pd.DataFrame({
-            "Score": scores,
-            "Softmax": [f"{p:.1%}" for p in plain],
-            "Softmax with T = 1.38": [f"{p:.1%}" for p in softened],
-        }, index=["Highly Fresh", "Fresh", "Not Fresh"])
-        st.markdown("**Example** (made-up scores):")
-        st.dataframe(example, width="stretch")
-        st.caption("Temperature scaling divides the scores by T before softmax. The order "
-                   "never changes (so the answer and the accuracy stay the same); only the "
-                   "confidence becomes more honest.")
-
-        st.subheader("What does \"87% Fresh\" mean?")
-        st.markdown(
-            "It is the model's **confidence**, not a lab measurement. A well-calibrated model "
-            "that says 87% is right about 87 out of 100 times it says that. The calibration "
-            "charts on the other tabs check exactly this.")
-
-        st.subheader("Where the percentages can be wrong")
-        st.markdown(
-            "- **Unknown things:** softmax always picks one of the classes it knows. A photo "
-            "of something that is not a fish, or a species it was not trained on, can still "
-            "get a high percentage. In our tests a plain colour gradient was called Yellow "
-            "Drum with 99%. The fish-eye check (see its tab) catches many of these, but "
-            "not all.\n"
-            "- **Photo quality:** dark, blurry or off-centre photos cause most mistakes.\n"
-            "- **Freshness is visual only:** it cannot detect bacteria, chemicals or toxins.\n"
-            "- **Dataset limits:** each freshness level was photographed on different days, "
-            "so lighting may have helped the model; the same fish appear on several days.")
+        with st.container(key="card_how"):
+            st.html('<div class="fs-label">How FishScan makes its percentages</div>')
+            st.markdown(
+                "1. The photo is resized to 224 x 224 pixels and passed through **MobileNetV2**, "
+                "pre-trained on 1.4 million everyday photos (transfer learning). It turns the "
+                "eye into 1,280 numbers describing shapes, colours and textures.\n"
+                "2. A small final layer gives every class a **score**.\n"
+                "3. **Softmax** turns the scores into probabilities that add up to 100%.")
+            scores = [4.0, 1.0, 0.5]
+            plain, softened = softmax(scores), softmax(scores, temperature=1.38)
+            st.dataframe(pd.DataFrame({
+                "Score": scores,
+                "Softmax": [f"{p:.1%}" for p in plain],
+                "With T = 1.38": [f"{p:.1%}" for p in softened],
+            }, index=["Highly Fresh", "Fresh", "Not Fresh"]), width="stretch")
+            st.caption("Example with made-up scores. Temperature scaling divides the scores by T: "
+                       "the order (and the answer) never changes, only the confidence.")
+        with st.container(key="card_meaning"):
+            st.html('<div class="fs-label">What does "87% Fresh" mean?</div>')
+            st.markdown("It is the model's **confidence**, not a lab measurement. A well-calibrated "
+                        "model that says 87% is right about 87 out of 100 times it says that.")
+        with st.container(key="card_wrong"):
+            st.html('<div class="fs-label">Where the percentages can be wrong</div>')
+            st.markdown(
+                "- **Unknown things:** softmax always picks a known class; the fish-eye check "
+                "catches many such photos, but not all.\n"
+                "- **Photo quality:** dark, blurry or off-centre photos cause most mistakes.\n"
+                "- **Freshness is visual only:** no bacteria, chemicals or toxins.\n"
+                "- **Dataset limits:** each freshness level was shot on different days, and the "
+                "same fish appear on several days.")
 
     # ------------------------------------------------------------------
     # About page
     # ------------------------------------------------------------------
     def show_about_page(self):
-        st.title("ℹ️ About FishScan")
-        st.markdown(
-            "FishScan looks at **one close-up photo of a fish's eye** and estimates two "
-            "things with machine learning:\n"
-            "1. **Which species** it is, as a probability for each of 7 species.\n"
-            "2. **How fresh** it looks, as a probability for each of 3 freshness levels.\n\n"
-            "It is meant to help buyers and sellers take a quick second look at fish, and to "
-            "show how a deep-learning model turns an image into meaningful probabilities.")
-        st.warning("**FishScan is a student project, NOT a food safety test.** Always check "
-                   "the smell, gills, skin and firmness yourself.")
-
-        st.subheader("📸 How to take a good photo")
-        st.markdown(PHOTO_TIPS)
-
-        st.subheader("🐟 Species FishScan knows")
-        rows = [{"Common name": common,
-                 "Scientific name": ", ".join(format_scientific(s) for s in scientific)}
-                for common, scientific in sorted(self._scientific.items())]
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-        st.caption("Common names follow FishBase. Two tilapia species (Mozambique and Nile "
-                   "tilapia) are combined into one \"Tilapia\" class, because they cannot be "
-                   "told apart reliably from an eye photo.")
-
-        st.subheader("🧊 Freshness levels")
-        levels = [{"Level": f"{guide['icon']} {level}",
-                   "Meaning in the dataset": f"Fish photographed on {guide['dataset_days']}"}
-                  for level, guide in FRESHNESS_GUIDE.items()]
-        st.dataframe(pd.DataFrame(levels), hide_index=True, width="stretch")
-        st.caption("These definitions come from the dataset's documentation. The dataset does "
-                   "not say how the fish were stored, so the levels are not shelf-life numbers.")
-
-        st.subheader("⚠️ Known limitations")
-        st.markdown(
-            "- **Only what it was trained on:** 7 species and 3 freshness levels, from eye "
-            "close-ups. Common market fish such as galunggong, tulingan, dalagang bukid and "
-            "lapu-lapu are not included.\n"
-            "- **It always picks an answer:** softmax forces a choice among the known classes, "
-            "so a photo that is not a fish (or an unknown species) can still get a high, "
-            "confident-looking percentage. FishScan's fish-eye check (it compares the photo "
-            "with the training photos and says \"Not recognized\" when it is too different) "
-            "and the Low confidence warning (below 60%) catch many of these cases, but not "
-            "every one.\n"
-            "- **Freshness is a visual estimate only:** a photo cannot detect bacteria, "
-            "chemicals, toxins or how the fish was handled. It is not a lab test.\n"
-            "- **Photo quality matters:** dark, blurry, off-centre or flash-glare photos cause "
-            "most mistakes.\n"
-            "- **Dataset limits:** each freshness level was photographed on different days, so "
-            "lighting may have helped the model; the same fish appear on several days; and "
-            "freshness accuracy is moderate (about 65% on test photos, see Model Performance).")
-
-        st.subheader("🔒 Privacy")
-        st.markdown("Your photo is analysed in memory and is **not saved** by FishScan.")
-
-        st.subheader("📚 Dataset and credits")
-        st.markdown(
-            "- **Dataset:** *The Freshness of the Fish Eyes (FFE) Dataset*, Mendeley Data, "
-            "[doi:10.17632/xzyx7pbr3w.1](https://doi.org/10.17632/xzyx7pbr3w.1), licensed "
-            "CC BY 4.0. Related article: Prasetyo, E., Purbaningtyas, R., Adityo, R.D., "
-            "Suciati, N., & Fatichah, C. (2022). *Combining MobileNetV1 and Depthwise "
-            "Separable Convolution Bottleneck with Expansion for Classifying the Freshness of "
-            "Fish Eyes.* Information Processing in Agriculture. "
-            "[doi:10.1016/j.inpa.2022.01.002](https://doi.org/10.1016/j.inpa.2022.01.002)\n"
-            "- **Model:** MobileNetV2 (pre-trained on ImageNet) with transfer learning, built "
-            "with TensorFlow / Keras.\n"
-            "- **Species names:** FishBase.\n"
-            "- **App:** Streamlit.")
-
-        st.subheader("👥 Developers")
-        st.markdown("\n".join(f"- {name}" for name in DEVELOPERS))
-        st.caption("IPT 102 - Integrative Programming and Technologies 2, final project "
-                   "(theme: Predicting Probabilities), 2026.")
+        st.html('<div class="fs-page-title">About FishScan</div>')
+        left, right = st.columns(2, gap="large")
+        with left:
+            with st.container(key="card_what"):
+                st.html('<div class="fs-label">What it does</div>')
+                st.markdown(
+                    "FishScan looks at **one close-up photo of a fish's eye** and estimates:\n"
+                    "1. **Which species** it is (probability for each of 7 species).\n"
+                    "2. **How fresh** it looks (probability for each of 3 levels).")
+                st.html(note_html("<b>Student project, NOT a food safety test.</b> Always check "
+                                  "the smell, gills, skin and firmness yourself.", "warn"))
+            with st.container(key="card_tips"):
+                st.html('<div class="fs-label">How to take a good photo</div>')
+                st.markdown(PHOTO_TIPS)
+            with st.container(key="card_species_list"):
+                # A list (not a table) so long scientific names wrap nicely on small phones
+                st.html('<div class="fs-label">Species FishScan knows</div>' + "".join(
+                    f'<div class="fs-list-row"><b>{html.escape(common)}</b>'
+                    f'<span class="fs-sci">{html.escape(", ".join(format_scientific(s) for s in sci))}'
+                    f'</span></div>' for common, sci in sorted(self._scientific.items())))
+                st.caption("Names follow FishBase. Mozambique and Nile tilapia are combined into "
+                           "one \"Tilapia\" class (hard to tell apart from an eye photo).")
+            with st.container(key="card_levels"):
+                st.html('<div class="fs-label">Freshness levels</div>' + "".join(
+                    f'<div style="margin:.35rem 0"><span class="fs-badge" '
+                    f'style="background:{g["color"]};color:{BADGE_TEXT[lvl]};font-size:.95rem">{g["icon"]} {lvl}</span> '
+                    f'<span class="fs-muted">photographed on {g["dataset_days"]}</span></div>'
+                    for lvl, g in FRESHNESS_GUIDE.items()))
+                st.caption("From the dataset's documentation; not shelf-life numbers.")
+        with right:
+            with st.container(key="card_limits"):
+                st.html('<div class="fs-label">Known limitations</div>')
+                st.markdown(
+                    "- **Only what it was trained on:** 7 species, 3 freshness levels, eye "
+                    "close-ups. Galunggong, tulingan, dalagang bukid and lapu-lapu are not "
+                    "included.\n"
+                    "- **It always picks an answer:** softmax forces a choice among known "
+                    "classes. The fish-eye check (\"Not recognized\") and the Low confidence "
+                    "warning catch many such cases, but not every one.\n"
+                    "- **Visual estimate only:** no bacteria, chemicals or toxins; not a lab test.\n"
+                    "- **Photo quality matters:** dark, blurry or glare photos cause most mistakes.\n"
+                    "- **Dataset limits:** freshness levels were shot on different days; the same "
+                    "fish appear on several days; freshness accuracy is moderate (about 65%).")
+            with st.container(key="card_privacy"):
+                st.html('<div class="fs-label">Privacy</div>'
+                        'Your photo is analysed in memory and is <b>not saved</b> by FishScan.')
+            with st.container(key="card_credits"):
+                st.html('<div class="fs-label">Dataset and credits</div>')
+                st.markdown(
+                    "- **Dataset:** *The Freshness of the Fish Eyes (FFE) Dataset*, Mendeley Data, "
+                    "[doi:10.17632/xzyx7pbr3w.1](https://doi.org/10.17632/xzyx7pbr3w.1), CC BY 4.0. "
+                    "Prasetyo, E., Purbaningtyas, R., Adityo, R.D., Suciati, N., & Fatichah, C. "
+                    "(2022). *Combining MobileNetV1 and Depthwise Separable Convolution Bottleneck "
+                    "with Expansion for Classifying the Freshness of Fish Eyes.* Information "
+                    "Processing in Agriculture. "
+                    "[doi:10.1016/j.inpa.2022.01.002](https://doi.org/10.1016/j.inpa.2022.01.002)\n"
+                    "- **Model:** MobileNetV2 (ImageNet) with transfer learning, TensorFlow / Keras.\n"
+                    "- **Species names:** FishBase. **App:** Streamlit.")
+            with st.container(key="card_devs"):
+                st.html('<div class="fs-label">Developers</div>'
+                        + "".join(f"<div>{html.escape(n)}</div>" for n in DEVELOPERS)
+                        + '<div class="fs-muted" style="margin-top:.4rem">IPT 102 - Integrative '
+                          'Programming and Technologies 2 · Predicting Probabilities · 2026</div>')
 
 
 def main():
