@@ -6,7 +6,6 @@
 #   models/experiments/  models/baseline/  models/quick_test/  checkpoints/
 #   reports/baseline/, and most of reports/experiments/
 #   *_examples.csv       (contain local file paths)
-#   scripts/, notebooks/ (training code stays on the laptop / Colab)
 #   data/not_fish_eye/, data/real_fish_eye/ (your own photos stay private)
 #   reports/eye_check_details.csv (file names of your photos)
 
@@ -15,8 +14,20 @@
 # --- project files ---
 !.gitignore
 !README.md
+!CLAUDE.md
 !requirements.txt
 !app.py
+
+# --- training code and the Colab notebook (backed up since 2026-11-23,
+#     after a laptop failure lost scripts that were never pushed) ---
+!scripts/
+!scripts/*.py
+!notebooks/
+!notebooks/*.ipynb
+
+# --- the fixed train/val/test split (paths only, no images) ---
+!data/
+!data/ffe_split.csv
 
 # --- app code ---
 !src/
