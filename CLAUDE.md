@@ -113,6 +113,5 @@ reports/               files the Model Performance page reads
 - [ ] Prepare for the defense on **December 5, 2026**.
 - [ ] `scripts/test_eye_check.py` (wrote `reports/eye_check_results.json`; app.py mentions it)
       is also lost: rebuild if the eye-check results need re-running.
-- [ ] `data/DATASETS.md` (download/unzip instructions, mentioned by several scripts) is missing.
 - [ ] Training history CSVs (`reports/*_history.csv`) and experiment models
       (`models/experiments/`) exist only on Google Drive.

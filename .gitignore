@@ -28,6 +28,7 @@
 # --- the fixed train/val/test split (paths only, no images) ---
 !data/
 !data/ffe_split.csv
+!data/DATASETS.md
 
 # --- app code ---
 !src/
