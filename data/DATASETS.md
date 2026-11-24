@@ -85,6 +85,50 @@ So FishScan stays **v1 (FFE only)**. A separate Philippine species dataset is
 **future work**: it should be photographed by us (real market fish, several fish per
 species, eye close-ups, split by fish, not by photo).
 
+## v2-species: Philippines Fish Market Dataset (evaluated, not used for training)
+
+| | |
+|---|---|
+| Source | GitHub: https://github.com/CloneIsL1fe/Fish_Identifier_Philippines (by CloneIsL1fe); images from the Google Drive link in its README (`Philippines_Fish_Market_Dataset.zip`, 1.07 GB, uploaded Dec 14, 2024) |
+| License | **Unclear.** The repo has no LICENSE file and the README gives no image license. Many images are copied from the internet (Shutterstock, Adobe Stock, online shops, Wikimedia Commons), so they keep their original owners' rights. Fine for a class experiment with credit; NOT safe to redistribute. |
+| Content | 1,814 files in 5 folders: Bangus 538, Dalagang bukid 179, Hiwas 157, Tilapia 800, Tulingan 140 |
+| Where | `data\raw\ph_market\Philippines Fish Market Dataset\` (not in GitHub) |
+
+Checked with `scripts/clean_species_dataset.py` (nothing deleted; decisions are in
+`data/species_manifest.csv`, contact sheets in `reports/species_cleaning/`, kept local):
+
+- 922 Roboflow `.rf.` copies, grouped by base name so copies stay in one split.
+- 160 exact duplicates (MD5) and 206 near-duplicates (pHash, at most 6 of 64 bits
+  different, same species only) removed.
+- Removed 16 stock / online-shop pictures (Shutterstock watermarks, product photos).
+- Label errors removed: 9 "Hiwas" screenshots that show tuna, 1 "Tilapia" that is a
+  Pelvicachromis cichlid.
+- Most Bangus images (287) come from a lab spoilage experiment of about 20 tagged fish
+  (T1-T20), not a market. The same files also appear in Roboflow projects.
+- Most Tilapia images are internet pictures (white backgrounds, aquariums, cooked fish,
+  watermarks).
+
+Independent photos left per species (copies counted once):
+
+| Species | Files | Kept | Real photos | Lab | Internet |
+|---|---|---|---|---|---|
+| Bangus | 538 | 366 | 56 | 162 | 148 |
+| Dalagang bukid | 179 | 95 | 85 | 0 | 10 |
+| Hiwas | 157 | 80 | 62 | 0 | 18 |
+| Tilapia | 800 | 338 | 23 | 0 | 330 |
+| Tulingan | 140 | 94 | 89 | 0 | 5 |
+
+"Real" = phone photos, market video frames, Wikimedia market photos. Even these are
+few fish: the phone photos of Dalagang bukid, Hiwas and Tulingan were each taken
+within about 2 minutes on Dec 12, 2024 (a few fish on one plate), and the numbered
+PNGs are frames from a few market videos.
+
+**Verdict: too small and not reliable.** No species reaches 100 real photos, and the
+real ones show only a few individual fish. A model would mostly learn the plate,
+the video, or the internet photo style, and its test accuracy would look better than
+it is. Not used for training. (This is also the same dataset FishScan v1 used as
+"not a fish eye" photos for the eye check.)
+
 ## Future work: DaFiF – Dataset for Fish's Freshness problems
 
 | | |
