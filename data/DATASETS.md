@@ -51,8 +51,39 @@ Limits: the 7 species are FFE's species (no galunggong or tulingan), and only ey
 photos are supported. Two tilapia species are merged into one "Tilapia" class.
 
 Our teacher **suggested** (not required) a separate dataset for the species model.
-v1 is tagged `v1-ffe-only` on GitHub. Philippine fish datasets are being checked;
-one will only be used if it is clean and reliable.
+v1 is tagged `v1-ffe-only` on GitHub. We checked Philippine fish datasets (below);
+none was clean enough, so this stays future work.
+
+## Checked: Philippine fish datasets for a separate species model (Nov 24, 2026)
+
+Our teacher suggested a separate species dataset with Philippine fish (bangus, tilapia,
+galunggong, tulingan). We searched Roboflow Universe and Kaggle. Most hits were
+grocery/food detection projects; these were the best fish-only candidates:
+
+| | 5 Classes Fish Casptone | Katambak (BISU) | Fish Dataset (Marinig Port) |
+|---|---|---|---|
+| Where | [Roboflow](https://universe.roboflow.com/fish-befuh/5-classes-fish-casptone-rq4yk) (PUP capstone) | [Roboflow](https://universe.roboflow.com/bisu-lpet1/katambak) | [Kaggle](https://www.kaggle.com/datasets/markdaniellampa/fish-dataset) |
+| Task | object detection | object detection | classification |
+| Images | 10,488 (v2: 17,810 with 2x rotation) | 7,827, no augmentation | 13,304 (own counts don't add up) |
+| Classes | Bangus, Island Mackerel, Lapu-Lapu, Tilapia, Tulingan | 11 species x Day 1-7 = 78 (+ a stray "\\" class); has bangus, tilapia, tulingan | 31 mostly freshwater species; has bangus, tilapia |
+| Galunggong | no | no | no |
+| Photo sources (sample of 50) | 13 stock/web/Facebook/screenshots, **9 FFE images** (our own test data!), 17 phone photos (11 burst near-copies), 11 from other sets; one file uploaded twice | all real phone photos, Oct 5-21 2023 | renamed `Bangus 1.jpg ...`, many 4-10 kB files (web thumbnails); source not documented |
+| Duplicates | `.rf.` re-exports, burst shots, a repeated file | same-second pairs (`102806` / `102806_2`) split across train/valid/test | unknown |
+| License | CC BY 4.0 | CC BY 4.0 | CDLA-Sharing-1.0 |
+
+**Verdict: none is clean enough to rely on.**
+- 5 Classes Fish Casptone: mixed internet/stock photos and it **contains FFE images**,
+  so testing on FFE would leak. A sibling project, "Fish Classification" (DA Project,
+  4,672 images), uses the same source photos and has the same problems.
+- Katambak: the most honest photos, but each class is a few fish shot within minutes,
+  and near-identical shots are randomly split, so its 99.4% mAP is leakage. Whole-fish
+  detection, not eye close-ups, and no galunggong.
+- Marinig Fish Dataset: undocumented sources (likely web images), inconsistent stats,
+  no galunggong or tulingan.
+
+So FishScan stays **v1 (FFE only)**. A separate Philippine species dataset is
+**future work**: it should be photographed by us (real market fish, several fish per
+species, eye close-ups, split by fish, not by photo).
 
 ## Future work: DaFiF – Dataset for Fish's Freshness problems
 

@@ -106,10 +106,10 @@ reports/               files the Model Performance page reads
   are now pushed to GitHub.
 
 ## To-do
-- [ ] Separate species dataset: only a **SUGGESTION** from our teacher, **not a requirement**.
-      v1 (FFE only, tag `v1-ffe-only`) is complete as it is. Research Philippine fish
-      datasets (deadline Nov 26, 2026); use one only if it is clean and reliable,
-      otherwise present it as future work. Don't change the app or models until decided.
+- [x] Separate species dataset: only a **SUGGESTION** from our teacher, **not a requirement**.
+      Checked Philippine datasets on Nov 24, 2026 (see data/DATASETS.md): none clean
+      enough (stock/web photos, FFE images inside, near-duplicate leakage, no galunggong).
+      Keep v1 (FFE only, tag `v1-ffe-only`) and present it as future work.
 - [ ] Prepare for the defense on **December 5, 2026**.
 - [ ] `scripts/test_eye_check.py` (wrote `reports/eye_check_results.json`; app.py mentions it)
       is also lost: rebuild if the eye-check results need re-running.
