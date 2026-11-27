@@ -110,10 +110,13 @@ reports/               files the Model Performance page reads
       Checked Philippine datasets on Nov 24, 2026 (see data/DATASETS.md): none clean
       enough (stock/web photos, FFE images inside, near-duplicate leakage, no galunggong).
       Keep v1 (FFE only, tag `v1-ffe-only`) and present it as future work.
-- [ ] Branch `v2-species`: evaluated the Philippines Fish Market Dataset
-      (CloneIsL1fe/Fish_Identifier_Philippines) with scripts/clean_species_dataset.py.
-      Too small after cleaning (23-89 real photos per species, few individual fish);
-      not trained. Decide: stay with v1, or take our own market photos.
+- [x] Branch `v2-species`: Philippines Fish Market Dataset rejected (too few real photos).
+- [ ] Branch `v2-species` (Option A, decided Nov 27): species = Bangladesh Mendeley dataset
+      (raw photos; Tilapia, Hito, Dalag, Puyo, Pangasius) + our own photos (bangus + all
+      5 others), freshness stays FFE. Evaluation, split rules, cap 400, and the source
+      check rule are in data/DATASETS.md. **Don't train until our photos are in**; then
+      scripts/check_own_photos.py -> scripts/make_species_split.py. Species photos are
+      WHOLE fish (Bangladesh style), so the app will need a second photo for species.
 - [ ] Prepare for the defense on **December 5, 2026**.
 - [ ] `scripts/test_eye_check.py` (wrote `reports/eye_check_results.json`; app.py mentions it)
       is also lost: rebuild if the eye-check results need re-running.

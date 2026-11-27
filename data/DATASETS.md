@@ -123,11 +123,97 @@ few fish: the phone photos of Dalagang bukid, Hiwas and Tulingan were each taken
 within about 2 minutes on Dec 12, 2024 (a few fish on one plate), and the numbered
 PNGs are frames from a few market videos.
 
-**Verdict: too small and not reliable.** No species reaches 100 real photos, and the
+**Verdict: too small and not reliable; decided Nov 27 not to train on it.** No species reaches 100 real photos, and the
 real ones show only a few individual fish. A model would mostly learn the plate,
 the video, or the internet photo style, and its test accuracy would look better than
 it is. Not used for training. (This is also the same dataset FishScan v1 used as
 "not a fish eye" photos for the eye check.)
+
+## v2-species: Bangladesh fish dataset (chosen for species, Option A)
+
+| | |
+|---|---|
+| Source | Mendeley Data: https://data.mendeley.com/datasets/8r24222wcc/3 |
+| DOI | 10.17632/8r24222wcc.3 |
+| License | CC BY 4.0 |
+| Authors | Sunny, S., Prodhan, S., Shakib, N., Rashid, M. R. A., & Mansoor, N. (2025). Comprehensive Smartphone Image Dataset for Fish Species Identification in Bangladesh's Freshwater Ecosystems. Mendeley Data, V3. |
+| File used | `Original Image.zip` (4.09 GB, RAW photos only). Version 3 splits the data into this zip and `Augmented.zip` (5.48 GB), which we do not use. |
+| Where | `data\raw\bd_fish\Original Image\<Folder>\*.jpg` (only the 8 folders below are unzipped) |
+
+Folders used: Telapiya -> Tilapia, Magur -> Hito, Shol -> Dalag, Koi -> Puyo,
+Pangas -> Pangasius. Taki, Tarabaim and Foli are also read, only to look for label
+conflicts with the snakeheads. Checked with `scripts/inspect_bd_species.py`
+(results in `data/bd_species_manifest.csv`, contact sheets in `reports/bd_check/`, kept local).
+
+| Species | Raw | Kept | Groups (2-min scenes) | Shooting days |
+|---|---|---|---|---|
+| Telapiya (Tilapia) | 2,058 | 1,578 | 33 | 4 |
+| Shol (Dalag) | 1,424 | 1,190 | 34 | 5 |
+| Koi (Puyo) | 842 | 647 | 14 | 3 |
+| Pangas (Pangasius) | 934 | 620 | 22 | 4 |
+| Magur (Hito) | 574 | 248 | 9 | 1 |
+
+- **Duplicates:** no exact duplicates, but 2,260 near-duplicates (burst shots of the same
+  fish in the same pose) across the 8 folders, removed. Magur lost 57%.
+- **Labels:** contact sheets look right for all 5 species. No file appears in two folders;
+  the 14 cross-folder look-alikes are different fish on similar backgrounds.
+  "Foli" is described as "Spotted Snakehead" on Mendeley, but its photos show a flat,
+  knife-shaped featherback; Taki is the real spotted snakehead. We use neither.
+  Koi has a group of pale/golden fish on one background next to the usual dark
+  climbing perch; they have the climbing perch shape, but it is worth a second look.
+- **Fish / scenes:** the photos were taken about once per second, 1-5 days per species,
+  on 3-4 phones (Feb 19 - Apr 1, 2022). Individual fish cannot be counted from the files,
+  so the split groups photos by phone + 2-minute block. **Magur is one 6-minute session
+  on one sack background**, so its test accuracy will look better than it is.
+- **Photo type:** whole fish on trays, sacks and tarps, NOT eye close-ups. The species
+  model therefore needs a whole-fish photo; the freshness model (FFE) still needs an
+  eye close-up.
+
+**Verdict: conditional GO** for Tilapia, Dalag, Puyo and Pangasius (real market photos,
+correct labels, open license, 600+ clean images each). **Hito is weak** (248 images from
+one session): usable only because our own hito photos give an honest test. The real
+check is how the model does on OUR photos (source check below), not on the Bangladesh
+test set.
+
+## v2-species: our own market photos
+
+Folder: `data\raw\own_photos\<species>\` with species `bangus`, `tilapia`, `hito`,
+`dalag`, `puyo`, `pangasius`. File name = species, fish number, photo number:
+`bangus_fish01_01.jpg`, `bangus_fish01_02.jpg`, ... `bangus_fish02_01.jpg`.
+The fish number is the GROUP: all photos of one fish stay in the same split.
+
+At the market:
+- Whole fish, like the Bangladesh photos (fish fills most of the photo, tray or table
+  behind it). Eye close-ups for freshness go in a separate folder, `data\raw\own_eyes\`,
+  so they never mix into the species model.
+- More fish beats more photos: 3-5 photos per fish. Bangus 15-20 fish; the other five
+  species at least 6 fish each, better 8-10 (each test set gets only about 1-2 of our
+  fish per species).
+- Vary the background (tray, table, scale, hand) for EVERY species, not only bangus.
+- JPG files (iPhone: Settings > Camera > Formats > Most Compatible).
+- Afterwards: `python scripts\check_own_photos.py` (names, unreadable files, duplicates,
+  fish counts).
+
+## v2-species: split, balance and source check (plan; nothing trained yet)
+
+`scripts/make_species_split.py` (run once our photos are in) -> `data/species_split.csv`:
+- groups = our fish (`own:bangus:fish01`) and Bangladesh 2-minute scenes; the leakage
+  check confirms no group is in two splits;
+- every species + source gets ~70/15/15 by groups, so each species has our own fish in
+  validation and test (tested with fake photos: OK);
+- **cap:** at most 400 Bangladesh images per class (one photo per scene first, so repeated
+  shots go first); training then uses balanced class weights for what is left
+  (~400 per Bangladesh class vs ~90 bangus).
+
+Source check (to run on the TEST set once, after training; rule agreed now):
+1. Accuracy and macro F1 separately for Bangladesh photos and for our photos.
+2. "Predicted Bangus" rate on our NON-bangus photos (does "our photo style" = bangus?),
+   and on Bangladesh photos.
+3. Per-fish results for our photos (few fish -> report them one by one, not only %).
+
+The model is acceptable only if (a) accuracy on our photos is no more than 10 points
+below the Bangladesh accuracy and (b) at most 10% of our non-bangus photos are predicted
+as Bangus. Otherwise we report it honestly and keep v1 for the defense.
 
 ## Future work: DaFiF – Dataset for Fish's Freshness problems
 

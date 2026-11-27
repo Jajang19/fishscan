@@ -30,6 +30,7 @@
 !data/ffe_split.csv
 !data/DATASETS.md
 !data/species_manifest.csv
+!data/bd_species_manifest.csv
 
 # --- app code ---
 !src/

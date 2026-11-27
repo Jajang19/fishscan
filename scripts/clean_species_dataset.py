@@ -32,7 +32,8 @@ sys.path.insert(0, str(PROJECT_DIR))  # so "from src..." works
 import numpy as np
 import pandas as pd
 from PIL import Image, ImageDraw, ImageOps
-from scipy.fft import dctn
+
+from src.image_checks import Groups, get_base_name, hamming_matrix, perceptual_hash
 
 DATA_DIR = PROJECT_DIR / "data" / "raw" / "ph_market" / "Philippines Fish Market Dataset"
 MANIFEST_CSV = PROJECT_DIR / "data" / "species_manifest.csv"
@@ -93,20 +94,6 @@ def ask_yes_no(question):
     return answer == "y"
 
 
-def get_base_name(file_name):
-    """Strips Roboflow and burst endings so copies of one photo share one base name.
-
-    Examples:
-      BLOATED-14-_JPG.rf.897815d9....jpg  -> bloated-14-
-      20241212_174032(1).jpg              -> 20241212_174032
-      t6_jpg.rf.22afc2a2....jpg           -> t6
-    """
-    stem = Path(file_name).stem.lower()
-    stem = re.sub(r"\.rf\.[0-9a-f]{32}$", "", stem)            # Roboflow export hash
-    stem = re.sub(r"(_(jpe?g|png|webp))+$", "", stem)          # "_jpg", "_jpeg_jpg", "_png"
-    stem = re.sub(r"\(\d+\)$", "", stem)                       # burst copies (0), (1)
-    return stem.strip(" _-") or stem
-
 
 def guess_source(file_name):
     """Returns the most likely source of a photo, from its file name.
@@ -120,12 +107,6 @@ def guess_source(file_name):
             return source
     return "unknown"
 
-
-def perceptual_hash(image):
-    """64-bit pHash: similar-looking pictures get hashes that differ in few bits."""
-    small = np.asarray(image.convert("L").resize((32, 32), Image.LANCZOS), dtype=np.float32)
-    low = dctn(small, norm="ortho")[:8, :8].flatten()[1:]   # 63 low frequencies, no DC
-    return np.append(low > np.median(low), False)            # 64 booleans
 
 
 def read_images():
@@ -156,21 +137,6 @@ def read_images():
     return pd.DataFrame(rows), np.array(hashes)
 
 
-class Groups:
-    """Union-find: puts images that belong together into one group."""
-
-    def __init__(self, n):
-        self._parent = list(range(n))
-
-    def find(self, i):
-        while self._parent[i] != i:
-            self._parent[i] = self._parent[self._parent[i]]
-            i = self._parent[i]
-        return i
-
-    def join(self, i, j):
-        self._parent[self.find(i)] = self.find(j)
-
 
 def decide(table, hashes):
     """Adds group ids and the keep/remove decision with a reason."""
@@ -200,8 +166,7 @@ def decide(table, hashes):
     # near-duplicates: pairs of the SAME species whose pHash differs in few bits.
     # (Across species, two different fish cut-outs on a white background can get
     # similar hashes, so only exact duplicates are matched across species.)
-    bits = hashes[ok].astype(np.uint8)
-    distance = (bits[:, None, :] != bits[None, :, :]).sum(axis=2)
+    distance = hamming_matrix(hashes[ok])
     species = table.loc[ok, "species"].to_numpy()
     same_species = species[:, None] == species[None, :]
     close = np.triu((distance <= NEAR_DUP_BITS) & same_species, k=1)
