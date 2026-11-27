@@ -149,18 +149,20 @@ conflicts with the snakeheads. Checked with `scripts/inspect_bd_species.py`
 |---|---|---|---|---|
 | Telapiya (Tilapia) | 2,058 | 1,578 | 33 | 4 |
 | Shol (Dalag) | 1,424 | 1,190 | 34 | 5 |
-| Koi (Puyo) | 842 | 647 | 14 | 3 |
+| Koi (Puyo) | 842 | 487 | 11 | 2 (Feb 19 excluded) |
 | Pangas (Pangasius) | 934 | 620 | 22 | 4 |
 | Magur (Hito) | 574 | 248 | 9 | 1 |
 
-- **Duplicates:** no exact duplicates, but 2,260 near-duplicates (burst shots of the same
+- **Duplicates:** no exact duplicates, but 2,147 near-duplicates (burst shots of the same
   fish in the same pose) across the 8 folders, removed. Magur lost 57%.
 - **Labels:** contact sheets look right for all 5 species. No file appears in two folders;
   the 14 cross-folder look-alikes are different fish on similar backgrounds.
   "Foli" is described as "Spotted Snakehead" on Mendeley, but its photos show a flat,
   knife-shaped featherback; Taki is the real spotted snakehead. We use neither.
-  Koi has a group of pale/golden fish on one background next to the usual dark
-  climbing perch; they have the climbing perch shape, but it is worth a second look.
+  **Koi, Feb 19, 2022 (273 raw photos, both phones):** pale/golden, slimmer fish on a dark
+  speckled tray, while every other Koi day shows the usual dark climbing perch. We could
+  not confirm they are climbing perch, so that whole session is excluded
+  (`EXCLUDED_SESSIONS` in the script; files are not deleted).
 - **Fish / scenes:** the photos were taken about once per second, 1-5 days per species,
   on 3-4 phones (Feb 19 - Apr 1, 2022). Individual fish cannot be counted from the files,
   so the split groups photos by phone + 2-minute block. **Magur is one 6-minute session
@@ -170,7 +172,7 @@ conflicts with the snakeheads. Checked with `scripts/inspect_bd_species.py`
   eye close-up.
 
 **Verdict: conditional GO** for Tilapia, Dalag, Puyo and Pangasius (real market photos,
-correct labels, open license, 600+ clean images each). **Hito is weak** (248 images from
+correct labels, open license, ~500-1,600 clean images each). **Hito is weak** (248 images from
 one session): usable only because our own hito photos give an honest test. The real
 check is how the model does on OUR photos (source check below), not on the Bangladesh
 test set.
@@ -182,17 +184,19 @@ Folder: `data\raw\own_photos\<species>\` with species `bangus`, `tilapia`, `hito
 `bangus_fish01_01.jpg`, `bangus_fish01_02.jpg`, ... `bangus_fish02_01.jpg`.
 The fish number is the GROUP: all photos of one fish stay in the same split.
 
-At the market:
-- Whole fish, like the Bangladesh photos (fish fills most of the photo, tray or table
-  behind it). Eye close-ups for freshness go in a separate folder, `data\raw\own_eyes\`,
-  so they never mix into the species model.
+At the market (decided Nov 27):
+- Every fish: 3-5 **whole-fish** photos for species, like the Bangladesh photos (fish fills
+  most of the photo, tray or table behind it), plus 1-2 **eye close-ups** for freshness.
+- Eye close-ups go in `data\raw\own_eyes\<species>\`, named with the SAME fish number:
+  `bangus_fish01_eye01.jpg`. They never mix into the species model (the split only reads
+  `own_photos`).
 - More fish beats more photos: 3-5 photos per fish. Bangus 15-20 fish; the other five
   species at least 6 fish each, better 8-10 (each test set gets only about 1-2 of our
   fish per species).
 - Vary the background (tray, table, scale, hand) for EVERY species, not only bangus.
 - JPG files (iPhone: Settings > Camera > Formats > Most Compatible).
 - Afterwards: `python scripts\check_own_photos.py` (names, unreadable files, duplicates,
-  fish counts).
+  fish counts, eye photos without a matching fish).
 
 ## v2-species: split, balance and source check (plan; nothing trained yet)
 
@@ -211,7 +215,7 @@ Source check (to run on the TEST set once, after training; rule agreed now):
    and on Bangladesh photos.
 3. Per-fish results for our photos (few fish -> report them one by one, not only %).
 
-The model is acceptable only if (a) accuracy on our photos is no more than 10 points
+Pass rule (agreed Nov 27, before training): the model is acceptable only if (a) accuracy on our photos is no more than 10 points
 below the Bangladesh accuracy and (b) at most 10% of our non-bangus photos are predicted
 as Bangus. Otherwise we report it honestly and keep v1 for the defense.
 

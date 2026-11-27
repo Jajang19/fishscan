@@ -49,6 +49,14 @@ SCENE_BLOCK = 120      # seconds: photos from one phone in the same 2-minute blo
 VISIT_GAP = 30         # minutes: a bigger gap = a new market visit
 MIN_SCENES = 100       # what we want per species, at least
 
+# Photos we leave out after looking at them: (folder, shooting date) -> why.
+# Koi on 2022-02-19 (both phones) shows pale/golden, slimmer fish on a dark speckled
+# tray. All other Koi days show the usual dark climbing perch. We could not confirm
+# that the golden fish are climbing perch, so they are excluded.
+EXCLUDED_SESSIONS = {
+    ("Koi", "2022-02-19"): "excluded: pale/golden fish, not confirmed as climbing perch",
+}
+
 
 def ask_yes_no(question):
     """Asks a y/n question and returns True for yes."""
@@ -132,6 +140,9 @@ def find_duplicates(table, hashes):
     """Marks exact and near duplicates; joins them into the same group as their scene."""
     table["decision"], table["reason"] = "keep", ""
     table.loc[~table["ok"], ["decision", "reason"]] = ["remove", "unreadable"]
+    day = table["time"].map(lambda t: t.strftime("%Y-%m-%d") if t else "")
+    for (folder, date), why in EXCLUDED_SESSIONS.items():
+        table.loc[(table["folder"] == folder) & (day == date), ["decision", "reason"]] = ["remove", why]
     groups = Groups(len(table))
     for _, members in table.groupby("scene").groups.items():
         members = list(members)
@@ -145,7 +156,8 @@ def find_duplicates(table, hashes):
             conflicts.append(" = ".join(table.loc[members, "path"]))
         for other in members[1:]:
             groups.join(members[0], other)
-            table.loc[other, ["decision", "reason"]] = ["remove", "exact duplicate"]
+            if table.at[other, "decision"] == "keep":
+                table.loc[other, ["decision", "reason"]] = ["remove", "exact duplicate"]
 
     ok = table.index[table["ok"]].to_numpy()
     distance = hamming_matrix(hashes[ok])
@@ -193,6 +205,8 @@ def print_report(table, conflicts, cross_pairs):
     print(f"\nExact duplicates removed: {(table['reason'] == 'exact duplicate').sum()}")
     print(f"Near-duplicates removed (pHash <= {NEAR_DUP_BITS} bits): "
           f"{(table['reason'] == 'near duplicate').sum()}")
+    for why, count in table.loc[table["reason"].str.startswith("excluded"), "reason"].value_counts().items():
+        print(f"Excluded after looking at them: {count} ({why})")
     print(f"Same file in two folders (label conflict): {len(conflicts)}")
     for line in conflicts[:10]:
         print(f"  - {line}")

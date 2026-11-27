@@ -117,6 +117,8 @@ reports/               files the Model Performance page reads
       check rule are in data/DATASETS.md. **Don't train until our photos are in**; then
       scripts/check_own_photos.py -> scripts/make_species_split.py. Species photos are
       WHOLE fish (Bangladesh style), so the app will need a second photo for species.
+      Market plan: 3-5 whole-fish photos + 1-2 eye close-ups (data/raw/own_eyes/) per fish.
+      Pass rule is fixed (DATASETS.md). Koi Feb 19, 2022 (golden fish) excluded.
 - [ ] Prepare for the defense on **December 5, 2026**.
 - [ ] `scripts/test_eye_check.py` (wrote `reports/eye_check_results.json`; app.py mentions it)
       is also lost: rebuild if the eye-check results need re-running.

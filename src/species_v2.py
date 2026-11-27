@@ -40,6 +40,22 @@ OWN_NAME = re.compile(r"^(?P<species>[a-z]+)_fish(?P<fish>\d{2,3})_(?P<photo>\d{
                       re.IGNORECASE)
 
 
+# Eye close-ups of the SAME fish, kept apart (data/raw/own_eyes/<folder>/), for freshness:
+# e.g. bangus_fish01_eye01.jpg  ->  fish 01 (same number as its whole-fish photos)
+OWN_EYE_NAME = re.compile(r"^(?P<species>[a-z]+)_fish(?P<fish>\d{2,3})_eye(?P<photo>\d{2})\.(jpe?g|png)$",
+                          re.IGNORECASE)
+
+
+def parse_eye_name(path):
+    """Like parse_own_name, for an eye close-up. Returns (species, fish id) or None."""
+    path = Path(path)
+    match = OWN_EYE_NAME.match(path.name)
+    if not match or match["species"].lower() != path.parent.name.lower():
+        return None
+    species = match["species"].lower()
+    return species, f"own:{species}:fish{int(match['fish']):02d}"
+
+
 def parse_own_name(path):
     """Returns (folder species, fish id) for one of our photos, or None if the name is wrong.
 
