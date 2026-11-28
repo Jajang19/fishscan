@@ -48,7 +48,8 @@ PAGES = {"Scan": ":material/photo_camera: Scan",
          "About": ":material/info: About"}
 
 PHOTO_TIPS = (
-    "- Take a **close-up of ONE eye**, filling most of the photo, with the eye in the **centre**.\n"
+    "- Take a **close-up of ONE eye**. Before **Analyze**, use **Zoom** and **Move** until the "
+    "eye fills most of the square.\n"
     "- Use **good, even light** (daylight is best). Avoid flash glare and dark shadows.\n"
     "- Hold the phone **steady** so the eye is sharp, not blurry.\n"
     "- FishScan knows **bangus, tilapia, island mackerel, goldband goatfish, yellow drum, "
@@ -261,7 +262,7 @@ class FishScanApp:
                                       "Please try another JPG or PNG photo.", "bad"))
 
             if image is not None:
-                st.image(image, width="stretch")
+                image, image_hash = self._show_crop_step(image, image_hash, key)
                 st.session_state.analyze_clicked = st.button(
                     "Analyze", icon=":material/search:", type="primary", width="stretch")
                 if st.session_state.result is not None or st.session_state.analyze_clicked:
@@ -276,6 +277,28 @@ class FishScanApp:
             st.caption(":material/lock: Your photo is analysed in memory, not stored on our server. "
                        "A small thumbnail and the result are kept in History on this device only.")
         return image, image_hash
+
+    def _show_crop_step(self, image, image_hash, key):
+        """Lets the user zoom in and move the square onto the eye BEFORE Analyze.
+
+        The preview shows exactly the square the model will look at. Sliders are
+        used because they work with a thumb on a phone and need no extra library.
+        Returns the cropped image and a hash that also includes the crop, so
+        changing the crop clears an old result.
+        """
+        with st.expander(":material/crop: Center the eye (zoom and move)", expanded=True):
+            zoom = st.slider("Zoom", 1.0, 8.0, 1.0, 0.1, key=f"zoom_{key}", format="%.1fx")
+            center_x = st.slider("Move left ↔ right", 0, 100, 50, key=f"move_x_{key}",
+                                 format="%d%%")
+            center_y = st.slider("Move up ↕ down", 0, 100, 50, key=f"move_y_{key}",
+                                 format="%d%%")
+        cropped = FishPredictor.crop_square(image, zoom, center_x / 100, center_y / 100)
+        preview = cropped.copy()
+        preview.thumbnail((640, 640))   # small copy for the screen; the model gets the full crop
+        st.image(preview, width="stretch")
+        st.caption("FishScan analyses only this square. Zoom in until the eye fills most of it.")
+        crop_hash = hashlib.md5(f"{image_hash}|{zoom}|{center_x}|{center_y}".encode()).hexdigest()
+        return cropped, crop_hash
 
     def _show_empty_state(self):
         """What a good photo looks like, before anything is chosen."""

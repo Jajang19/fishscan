@@ -78,6 +78,22 @@ class FishPredictor:
     def threshold(self):
         return self._threshold
 
+    @staticmethod
+    def crop_square(image, zoom=1.0, center_x=0.5, center_y=0.5):
+        """Cuts the square the user chose on the Scan page (the eye).
+
+        zoom 1 = the biggest square that fits; zoom 4 = a square 4x smaller.
+        center_x / center_y = where the square's centre is, from 0 (left/top)
+        to 1 (right/bottom). The square always stays inside the photo.
+        With the defaults this is exactly the old centre-square crop.
+        """
+        image = ImageOps.exif_transpose(image).convert("RGB")
+        width, height = image.size
+        side = max(1, round(min(width, height) / max(zoom, 1.0)))
+        left = min(max(round(center_x * width - side / 2), 0), width - side)
+        top = min(max(round(center_y * height - side / 2), 0), height - side)
+        return image.crop((left, top, left + side, top + side))
+
     def prepare_image(self, image):
         """PIL image -> array (1, 224, 224, 3) with pixels 0-255, like in training.
 
