@@ -1,0 +1,12 @@
+{
+  "source": "scripts/eye_check_tradeoff.py in Colab (branch v1-crop), 2026-11-28; FFE validation eyes only",
+  "threshold": 0.2371,
+  "warning_threshold": 0.2838,
+  "validation_images": 613,
+  "validation_normal": 582,
+  "validation_warning": 24,
+  "validation_not_recognized": 7,
+  "non_eye_images": 1813,
+  "non_eye_not_recognized": 1813,
+  "non_eye_warning": 0
+}

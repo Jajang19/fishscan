@@ -8,7 +8,9 @@ Builds the fish-eye check file models/eye_check.npz that the app uses to say
   2. The same is done for every VALIDATION image.
   3. EyeChecker sets the cut-off (threshold) so that 95% of the validation
      eye photos pass. The test set is NOT used here.
-  4. The reference features + threshold + k are saved to models/eye_check.npz.
+     A second cut-off (99% pass) ends the "warning zone": between the two cut-offs
+     the app shows results with an "unusual photo" note.
+  4. The reference features + both cut-offs + k are saved to models/eye_check.npz.
 
 Images are prepared with FishPredictor.prepare_image (centre square, 224 x 224),
 exactly like a photo uploaded in the app.
@@ -32,7 +34,7 @@ import numpy as np
 from PIL import Image
 
 from src.dataset_loader import DatasetLoader
-from src.eye_checker import EyeChecker, K_NEIGHBOURS, KEEP_FRACTION
+from src.eye_checker import EyeChecker, K_NEIGHBOURS, KEEP_FRACTION, WARNING_KEEP_FRACTION
 from src.fish_predictor import FishPredictor, EYE_CHECK_FILE
 
 DATA_DIR = PROJECT_DIR / "data" / "raw" / "ffe"
@@ -101,13 +103,16 @@ def main():
     val_features = split_features(predictor, loader, "val")
 
     checker = EyeChecker(train_features, k=K_NEIGHBOURS)
-    threshold = checker.fit_threshold(val_features, keep=KEEP_FRACTION)
+    threshold = checker.fit_threshold(val_features, keep=KEEP_FRACTION,
+                                      warning_keep=WARNING_KEEP_FRACTION)
     passed = checker.is_fish_eye(val_features).mean()
 
     print(f"\nReference set: {len(train_features)} training photos, k={K_NEIGHBOURS}")
     print(f"Threshold (distance {KEEP_FRACTION:.0%} of validation eye photos stay under): "
           f"{threshold:.4f}")
-    print(f"Validation eye photos that pass: {passed:.1%}")
+    print(f"Warning cut-off ({WARNING_KEEP_FRACTION:.0%} of validation eye photos): "
+          f"{checker.warning_threshold:.4f}")
+    print(f"Validation eye photos that get results (normal or warning): {passed:.1%}")
     print_existing()
 
     if OUT_PATH.exists() and not ask_yes_no(f"\nReplace {OUT_PATH}?"):

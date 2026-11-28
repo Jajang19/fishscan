@@ -18,7 +18,7 @@ import tensorflow as tf
 from PIL import Image, ImageOps
 
 from src.dataset_loader import SPECIES_NAMES
-from src.eye_checker import EyeChecker
+from src.eye_checker import ZONE_NORMAL, ZONE_NOT_RECOGNIZED, EyeChecker
 from src.fish_model import FishModel
 
 CONFIDENCE_THRESHOLD = 0.60
@@ -140,14 +140,22 @@ class FishPredictor:
                 "species": species, "freshness": freshness}
 
     def _check_eye(self, features):
-        """Runs the fish-eye check (if its file was found)."""
+        """Runs the fish-eye check (if its file was found).
+
+        zone: "normal", "warning" (results shown with an "unusual photo" note) or
+        "not_recognized". recognized = True when results are shown at all.
+        Both cut-offs come from models/eye_check.npz, not from the app.
+        """
         if self._eye_checker is None:
-            return {"available": False, "recognized": True}
+            return {"available": False, "recognized": True, "zone": ZONE_NORMAL}
         distance = float(self._eye_checker.distances(features)[0])
+        zone = self._eye_checker.zone(distance)
         return {"available": True,
-                "recognized": distance <= self._eye_checker.threshold,
+                "recognized": zone != ZONE_NOT_RECOGNIZED,
+                "zone": zone,
                 "distance": distance,
-                "threshold": self._eye_checker.threshold}
+                "threshold": self._eye_checker.threshold,
+                "warning_threshold": self._eye_checker.warning_threshold}
 
     def _describe(self, class_names, probabilities):
         """Turns one model's softmax output into an easy-to-show dictionary."""

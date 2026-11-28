@@ -26,7 +26,9 @@ import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image, UnidentifiedImageError
 
-from src.fish_predictor import FRESHNESS_GUIDE, FishPredictor, scientific_names_by_species
+from src.eye_checker import ZONE_NOT_RECOGNIZED, ZONE_WARNING, EyeChecker
+from src.fish_predictor import (EYE_CHECK_FILE, FRESHNESS_GUIDE, FishPredictor,
+                                scientific_names_by_species)
 from src.history_manager import HistoryManager
 from src.model_evaluator import ModelEvaluator
 
@@ -79,6 +81,23 @@ def load_eye_check_results():
         return None
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+@st.cache_data
+def load_eye_zones():
+    """The eye-check cut-offs (from models/eye_check.npz) and how the FFE validation eyes
+    fell into the three zones (reports/eye_check_zones.json). Either part may be None."""
+    try:
+        checker = EyeChecker.load(MODELS_DIR / EYE_CHECK_FILE)
+        cutoffs = {"threshold": checker.threshold, "warning": checker.warning_threshold}
+    except FileNotFoundError:
+        cutoffs = None
+    path = REPORTS_DIR / "eye_check_zones.json"
+    counts = None
+    if path.exists():
+        with open(path, encoding="utf-8") as f:
+            counts = json.load(f)
+    return cutoffs, counts
 
 
 @st.cache_data
@@ -333,6 +352,10 @@ class FishScanApp:
                     st.html(self._species_html(result["species"], threshold)
                             + self._freshness_html(result["freshness"], threshold))
         else:
+            if eye_check.get("zone") == ZONE_WARNING:
+                # Borderline: show the results, but say clearly they may be less reliable
+                with st.container(key="card_unusual"):
+                    st.html(self._unusual_photo_html())
             with st.container(key="card_species"):
                 st.html(self._species_html(result["species"], threshold))
             with st.container(key="card_freshness"):
@@ -347,6 +370,16 @@ class FishScanApp:
                     + '<div class="fs-muted">⚠️ FishScan is a student machine-learning project, '
                       'NOT a food safety test. A photo cannot detect bacteria, chemicals or '
                       'toxins.</div>')
+
+    @staticmethod
+    def _unusual_photo_html():
+        """Warning-zone note: the photo is close to, but not quite like, the training eyes."""
+        return note_html("<b>⚠️ This photo looks unusual - results may be less reliable.</b> "
+                         "It is less similar to the fish-eye photos FishScan learned from than "
+                         "most real eye photos (blur, glare, angle, crop, or a fish FishScan does "
+                         "not know). Treat the percentages below with extra care. "
+                         "<b>Tip:</b> retake a sharp, well-lit close-up and zoom in on the eye.",
+                         "warn")
 
     def _low_confidence_html(self, what, probability, threshold):
         return note_html(f"<b>⚠️ Low confidence</b> - the top {what} is only "
@@ -394,7 +427,9 @@ class FishScanApp:
     def _card_html(self, result, threshold):
         """The result card saved with each scan, so History shows the same card."""
         if result["eye_check"]["recognized"]:
-            return (self._species_html(result["species"], threshold)
+            unusual = (self._unusual_photo_html()
+                       if result["eye_check"].get("zone") == ZONE_WARNING else "")
+            return (unusual + self._species_html(result["species"], threshold)
                     + self._freshness_html(result["freshness"], threshold))
         return ('<div class="fs-big">🚫 Not recognized</div>'
                 '<p class="fs-muted">This photo did not look like a fish-eye close-up. '
@@ -552,7 +587,8 @@ class FishScanApp:
                         "as the final model. Test accuracy: 65.5% (first model: 62.8%).")
 
     def _show_eye_check_report(self):
-        """How the 'Not recognized' check works and how well it did."""
+        """How the eye check and its three zones work, and how well it did."""
+        cutoffs, counts = load_eye_zones()
         with st.container(key="card_eyecheck"):
             st.html('<div class="fs-label">Is it really a fish eye?</div>')
             st.markdown(
@@ -560,14 +596,46 @@ class FishScanApp:
                 "can still come out as \"Tilapia 99%\". FishScan first checks whether the photo "
                 "**looks like the eye photos it learned from**:\n"
                 "1. The species model turns the photo into 1,280 feature numbers.\n"
-                "2. They are compared with all 3,113 **training** eye photos (average similarity "
-                "of the **5 most similar**).\n"
-                "3. Farther away than **95% of real validation eye photos** → "
-                "**🚫 Not recognized**.")
+                "2. They are compared with all 3,113 **training** eye photos. The **distance** "
+                "is 1 minus the average similarity of the **5 most similar** ones "
+                "(0 = identical).\n"
+                "3. The distance puts the photo in one of **three zones**.")
+            if cutoffs and cutoffs["warning"] is not None:
+                t, w = cutoffs["threshold"], cutoffs["warning"]
+                zones = pd.DataFrame({
+                    "Zone": ["✅ Normal", "⚠️ Unusual photo", "🚫 Not recognized"],
+                    "Distance": [f"up to {t:.3f}", f"{t:.3f} - {w:.3f}", f"above {w:.3f}"],
+                    "What you see": ["species and freshness",
+                                     "results + 'may be less reliable' note",
+                                     "no results (guesses hidden)"],
+                })
+                if counts:
+                    n, m = counts["validation_images"], counts["non_eye_images"]
+                    zones["Real FFE validation eyes"] = [
+                        f"{counts['validation_normal'] / n:.1%}",
+                        f"{counts['validation_warning'] / n:.1%}",
+                        f"{counts['validation_not_recognized'] / n:.1%}"]
+                    zones["Non-eye market photos"] = [
+                        f"{(m - counts['non_eye_warning'] - counts['non_eye_not_recognized']) / m:.1%}",
+                        f"{counts['non_eye_warning'] / m:.1%}",
+                        f"{counts['non_eye_not_recognized'] / m:.1%}"]
+                st.dataframe(zones, hide_index=True, width="stretch")
+                caption = ("Both cut-offs were chosen on **validation eye photos only**: 95% of "
+                           "them are below the first, 99% below the second.")
+                if counts:
+                    caption += (f" Measured on {counts['validation_images']} validation eyes and "
+                                f"{counts['non_eye_images']:,} market photos that are not eye "
+                                "close-ups.")
+                st.caption(caption + " Why a middle zone: without it, 5% of real eye photos "
+                           "were rejected; with it, only about 1% are, while every non-eye photo "
+                           "is still caught. Borderline photos get results, but with a clear "
+                           "warning instead of looking fully trustworthy.")
             results = load_eye_check_results()
             if results is None:
                 st.info("No test results yet. Run `python scripts/test_eye_check.py`.")
                 return
+            st.html('<div class="fs-label" style="margin-top:.8rem">Earlier test (strict rule '
+                    'only, before the warning zone)</div>')
             rows = []
             for group in results["groups"]:
                 should_pass = group["wrongly_rejected"] is not None
@@ -578,9 +646,9 @@ class FishScanApp:
                              "Result": (f"{rate:.1%} wrongly rejected" if should_pass
                                         else f"{rate:.1%} caught")})
             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-            st.caption("The cut-off was chosen on validation photos only; these groups were "
-                       "used only for reporting. Stricter cut-off = more non-eye photos caught, "
-                       "but more real (unusual) eye photos rejected.")
+            st.caption("These results used only the first (95%) cut-off, so photos now in the "
+                       "warning zone counted as rejected here. The groups were used only for "
+                       "reporting, never to choose a cut-off.")
 
     def _show_explanations(self):
         with st.container(key="card_how"):
@@ -608,7 +676,9 @@ class FishScanApp:
             st.html('<div class="fs-label">Where the percentages can be wrong</div>')
             st.markdown(
                 "- **Unknown things:** softmax always picks a known class; the fish-eye check "
-                "catches many such photos, but not all.\n"
+                "catches many such photos (\"Not recognized\") or flags them (\"Unusual "
+                "photo\"), but not all. An eye of a fish FishScan does not know can still look "
+                "like a normal eye.\n"
                 "- **Photo quality:** dark, blurry or off-centre photos cause most mistakes.\n"
                 "- **Freshness is visual only:** no bacteria, chemicals or toxins.\n"
                 "- **Dataset limits:** each freshness level was shot on different days, and the "
@@ -632,6 +702,25 @@ class FishScanApp:
             with st.container(key="card_tips"):
                 st.html('<div class="fs-label">How to take a good photo</div>')
                 st.markdown(PHOTO_TIPS)
+            with st.container(key="card_zones"):
+                st.html('<div class="fs-label">What the result screens mean</div>')
+                st.markdown(
+                    "Before showing a result, FishScan checks how much the photo looks like the "
+                    "fish-eye photos it learned from:\n"
+                    "- **✅ Normal** - looks like a typical training eye: species and freshness "
+                    "are shown.\n"
+                    "- **⚠️ Unusual photo** - it is an eye-like photo, but less typical "
+                    "(blur, glare, angle, crop, or a fish FishScan does not know). Results are "
+                    "shown **with a note that they may be less reliable**.\n"
+                    "- **🚫 Not recognized** - it does not look like a fish-eye close-up, so no "
+                    "results are shown.\n\n"
+                    "Separately, **Low confidence** means the top answer is below 60%.")
+                cutoffs, _ = load_eye_zones()
+                if cutoffs and cutoffs["warning"] is not None:
+                    st.caption(f"Cut-offs: distance up to {cutoffs['threshold']:.3f} normal, up "
+                               f"to {cutoffs['warning']:.3f} unusual, above that not recognized. "
+                               "Chosen so that 95% / 99% of real validation eye photos pass; "
+                               "see Performance → Eye check.")
             with st.container(key="card_species_list"):
                 # A list (not a table) so long scientific names wrap nicely on small phones
                 st.html('<div class="fs-label">Species FishScan knows</div>' + "".join(
@@ -655,8 +744,8 @@ class FishScanApp:
                     "close-ups. Galunggong, tulingan, dalagang bukid and lapu-lapu are not "
                     "included.\n"
                     "- **It always picks an answer:** softmax forces a choice among known "
-                    "classes. The fish-eye check (\"Not recognized\") and the Low confidence "
-                    "warning catch many such cases, but not every one.\n"
+                    "classes. The fish-eye check (\"Not recognized\" / \"Unusual photo\") and the "
+                    "Low confidence warning catch many such cases, but not every one.\n"
                     "- **Visual estimate only:** no bacteria, chemicals or toxins; not a lab test.\n"
                     "- **Photo quality matters:** dark, blurry or glare photos cause most mistakes.\n"
                     "- **Dataset limits:** freshness levels were shot on different days; the same "

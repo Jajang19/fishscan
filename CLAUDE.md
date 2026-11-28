@@ -79,6 +79,15 @@ reports/               files the Model Performance page reads
 - **Fish-eye check** (softmax always sums to 100%, even for a photo of a hand):
   k-NN (k=5, cosine) on the species model's 1,280 pooled features vs. all 3,113 training
   photos; threshold = distance that 95% of validation eye photos stay under (0.2371).
+- **Eye-check warning zone** (branch `v1-crop`, decided 2026-11-28): our market eye
+  photos were all rejected at 0.26-0.30. Measured on FFE VALIDATION only
+  (scripts/eye_check_tradeoff.py in Colab): 95% rule rejects 5.1% of real eyes, a 99%
+  cut-off (0.2838) only 1.1%; all 1,813 non-eye market photos are still caught at both.
+  Three zones: <= 0.2371 normal, 0.2371-0.2838 results + "unusual photo, may be less
+  reliable" note, > 0.2838 Not recognized. Both cut-offs live in models/eye_check.npz
+  (scripts/set_eye_warning_zone.py), never hard-coded; NOT tuned on our market photos.
+- **Crop step** (branch `v1-crop`): Zoom + Move sliders on the Scan page; the model sees
+  only the chosen square (FishPredictor.crop_square). Default = old centre square.
 - **Confidence threshold 60%** -> "Low confidence" warning.
 - **Freshness guide** uses only the dataset's storage-day labels (no invented shelf life).
 - **History** is stored in the user's browser (public app; server files are lost on restart).
@@ -110,6 +119,11 @@ reports/               files the Model Performance page reads
       Checked Philippine datasets on Nov 24, 2026 (see data/DATASETS.md): none clean
       enough (stock/web photos, FFE images inside, near-duplicate leakage, no galunggong).
       Keep v1 (FFE only, tag `v1-ffe-only`) and present it as future work.
+- [ ] Branch `v1-crop`: run E5/E6 in Colab (real-world test on our market eye crops,
+      `fish_eye_crops.zip` in Drive, never in GitHub), test the crop sliders on the second
+      Streamlit app, then merge `v1-crop` into `main` if it works.
+- [ ] Laptop: Windows Smart App Control (kept ON) blocks TensorFlow's DLLs, so models run
+      only in Colab / Streamlit Cloud now; scripts were tested here with stand-ins only.
 - [ ] Prepare for the defense on **December 5, 2026**.
 - [ ] `scripts/test_eye_check.py` (wrote `reports/eye_check_results.json`; app.py mentions it)
       is also lost: rebuild if the eye-check results need re-running.

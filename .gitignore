@@ -64,6 +64,7 @@
 !reports/*_training_curves.png
 !reports/*_examples.png
 !reports/eye_check_results.json
+!reports/eye_check_zones.json
 # small tables that explain how the final freshness model was chosen
 !reports/experiments/
 !reports/experiments/comparison_val.csv

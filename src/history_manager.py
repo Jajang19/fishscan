@@ -54,13 +54,16 @@ class HistoryManager:
     def make_entry(self, scan_id, image, result, card_html):
         """Everything we remember about one scan (results only, no model data).
 
-        status: "unrecognized" (fish-eye check failed), "low" (a top probability
+        status: "unrecognized" (fish-eye check failed), "unusual" (eye-check warning
+        zone: results shown with a note), "low" (a top probability
         below the threshold) or "ok". card_html is the same result card the
         Scan page showed, so the detail view looks identical.
         """
         species, freshness = result["species"], result["freshness"]
         if not result["eye_check"]["recognized"]:
             status = "unrecognized"
+        elif result["eye_check"].get("zone") == "warning":
+            status = "unusual"   # results shown, with the "may be less reliable" note
         elif species["low_confidence"] or freshness["low_confidence"]:
             status = "low"
         else:
@@ -195,6 +198,7 @@ function showList() {{
     const sub = x.status === "unrecognized" ? "Not a fish-eye close-up" :
                 esc(x.freshness) + " · " + pct(x.freshness_p);
     const chip = x.status === "low" ? '<span class="chip low">Low confidence</span>' :
+                 x.status === "unusual" ? '<span class="chip low">Unusual photo</span>' :
                  x.status === "unrecognized" ? '<span class="chip unrecognized">Not recognized</span>' : "";
     html += '<div class="hist-card hist-row"><img src="' + x.thumb + '" alt="">' +
             '<button class="hist-open" onclick="showDetail(\\'' + x.id + '\\')">' +
